@@ -21,8 +21,11 @@ struct SplashView: View {
     /// Logo 透明度
     @State private var logoOpacity: Double = 0
 
-    /// 是否完成加载
+    /// 是否完成加载（绑定到父视图）
     @Binding var isFinished: Bool
+
+    /// 检查会话的回调（启动时调用）
+    var onCheckSession: (() async -> Void)?
 
     var body: some View {
         ZStack {
@@ -129,7 +132,9 @@ struct SplashView: View {
         }
         .onAppear {
             startAnimations()
-            simulateLoading()
+        }
+        .task {
+            await performLoading()
         }
     }
 
@@ -148,27 +153,47 @@ struct SplashView: View {
         }
     }
 
-    // MARK: - 模拟加载
+    // MARK: - 加载流程
 
-    private func simulateLoading() {
-        // 模拟加载过程
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+    private func performLoading() async {
+        // 阶段1：初始化
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+
+        // 阶段2：检查会话状态
+        await MainActor.run {
+            loadingText = "正在检查登录状态..."
+        }
+
+        // 调用会话检查
+        if let checkSession = onCheckSession {
+            await checkSession()
+        }
+
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+
+        // 阶段3：加载资源
+        await MainActor.run {
             loadingText = "正在加载资源..."
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
+
+        // 阶段4：完成
+        await MainActor.run {
             loadingText = "准备就绪"
         }
 
-        // 完成加载，进入主界面
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3秒
+
+        // 完成加载，进入下一页面
+        await MainActor.run {
             withAnimation(.easeInOut(duration: 0.3)) {
-                isFinished = true
+                isFinished = false // 注意：这里改为 false 来隐藏启动页
             }
         }
     }
 }
 
 #Preview {
-    SplashView(isFinished: .constant(false))
+    SplashView(isFinished: .constant(true))
 }
