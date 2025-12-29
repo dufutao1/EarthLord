@@ -11,7 +11,9 @@ import SwiftUI
 struct EarthLordApp: App {
     var body: some Scene {
         WindowGroup {
-            RootView()
+            NavigationStack {
+                SupabaseTestView()
+            }
         }
     }
 }
