@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import GoogleSignIn
 
 @main
 struct EarthLordApp: App {
@@ -44,6 +45,11 @@ struct EarthLordApp: App {
             .task {
                 // 监听认证状态变化
                 await authManager.startAuthStateListener()
+            }
+            .onOpenURL { url in
+                // 处理 Google Sign-In 回调
+                print("🔗 [App] 收到 URL 回调: \(url)")
+                GIDSignIn.sharedInstance.handle(url)
             }
         }
     }
