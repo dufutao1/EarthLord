@@ -13,6 +13,9 @@ struct ProfileTabView: View {
     /// 认证管理器
     @StateObject private var authManager = AuthManager.shared
 
+    /// 语言管理器
+    @StateObject private var languageManager = LanguageManager.shared
+
     /// 是否显示登出确认弹窗
     @State private var showLogoutAlert = false
 
@@ -32,6 +35,9 @@ struct ProfileTabView: View {
     @State private var deleteResultMessage: String?
     @State private var showDeleteResult = false
 
+    /// 是否显示语言选择器
+    @State private var showLanguagePicker = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -43,6 +49,9 @@ struct ProfileTabView: View {
                     VStack(spacing: 24) {
                         // 用户信息卡片
                         userInfoCard
+
+                        // 语言设置
+                        languageSection
 
                         // 功能菜单
                         menuSection
@@ -79,7 +88,12 @@ struct ProfileTabView: View {
             .sheet(isPresented: $showDeleteAccountSheet) {
                 deleteAccountConfirmSheet
             }
+            // 语言选择器
+            .sheet(isPresented: $showLanguagePicker) {
+                languagePickerSheet
+            }
         }
+        .id(languageManager.languageRefreshID)
     }
 
     // MARK: - 用户信息卡片
@@ -141,6 +155,116 @@ struct ProfileTabView: View {
         .cornerRadius(16)
     }
 
+    // MARK: - 语言设置
+
+    private var languageSection: some View {
+        Button {
+            print("🌐 [个人中心] 用户点击语言设置")
+            showLanguagePicker = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "globe")
+                    .font(.system(size: 20))
+                    .foregroundColor(ApocalypseTheme.primary)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("语言设置")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(ApocalypseTheme.textPrimary)
+
+                    Text(languageManager.currentLanguage.displayName)
+                        .font(.system(size: 12))
+                        .foregroundColor(ApocalypseTheme.textSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(ApocalypseTheme.textMuted)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .background(ApocalypseTheme.cardBackground)
+        .cornerRadius(16)
+    }
+
+    // MARK: - 语言选择器
+
+    private var languagePickerSheet: some View {
+        NavigationStack {
+            ZStack {
+                ApocalypseTheme.background
+                    .ignoresSafeArea()
+
+                VStack(spacing: 16) {
+                    ForEach(AppLanguage.allCases) { language in
+                        languageOptionButton(language)
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+            }
+            .navigationTitle("选择语言")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        showLanguagePicker = false
+                    }
+                    .foregroundColor(ApocalypseTheme.primary)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func languageOptionButton(_ language: AppLanguage) -> some View {
+        Button {
+            print("🌐 [个人中心] 用户选择语言: \(language.rawValue)")
+            languageManager.setLanguage(language)
+            showLanguagePicker = false
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: language.icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(ApocalypseTheme.primary)
+                    .frame(width: 32)
+
+                Text(language.displayName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(ApocalypseTheme.textPrimary)
+
+                Spacer()
+
+                if languageManager.currentLanguage == language {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(ApocalypseTheme.success)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .background(
+            languageManager.currentLanguage == language ?
+            ApocalypseTheme.primary.opacity(0.1) : ApocalypseTheme.cardBackground
+        )
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    languageManager.currentLanguage == language ?
+                    ApocalypseTheme.primary : Color.clear,
+                    lineWidth: 1
+                )
+        )
+    }
+
     // MARK: - 功能菜单
 
     private var menuSection: some View {
@@ -163,7 +287,7 @@ struct ProfileTabView: View {
         .cornerRadius(16)
     }
 
-    private func menuItem(icon: String, title: String, subtitle: String) -> some View {
+    private func menuItem(icon: String, title: LocalizedStringKey, subtitle: LocalizedStringKey) -> some View {
         Button {
             // TODO: 导航到对应页面
         } label: {
@@ -366,7 +490,7 @@ struct ProfileTabView: View {
     }
 
     // 警告项
-    private func warningItem(_ text: String) -> some View {
+    private func warningItem(_ text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "xmark.circle.fill")
                 .foregroundColor(ApocalypseTheme.danger)

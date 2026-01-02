@@ -10,14 +10,16 @@
 		E4A65F6E2EFE904E00F4A26F /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = E4A65F6D2EFE904E00F4A26F /* Supabase */; };
 		E4C5C6D32F03FD9100F30AB6 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = E4C5C6D22F03FD9100F30AB6 /* GoogleSignIn */; };
 		E4C5C6D52F03FD9100F30AB6 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = E4C5C6D42F03FD9100F30AB6 /* GoogleSignInSwift */; };
+		E4F6E3312F04D1450048E392 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E4F6E3302F04D1450048E392 /* Localizable.xcstrings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		E4A647D32EFA31C200F4A26F /* EarthLord.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EarthLord.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E4F6E3302F04D1450048E392 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		E4A647D62EFA31C200F4A26F /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		E4A647D62EFA31C200F4A26F /* Exceptions for "EarthLord" folder in "EarthLord" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -30,7 +32,7 @@
 		E4A647D52EFA31C200F4A26F /* EarthLord */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				E4A647D62EFA31C200F4A26F /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				E4A647D62EFA31C200F4A26F /* Exceptions for "EarthLord" folder in "EarthLord" target */,
 			);
 			path = EarthLord;
 			sourceTree = "<group>";
@@ -54,6 +56,7 @@
 		E4A647CA2EFA31C200F4A26F = {
 			isa = PBXGroup;
 			children = (
+				E4F6E3302F04D1450048E392 /* Localizable.xcstrings */,
 				E4A647D52EFA31C200F4A26F /* EarthLord */,
 				E4A647D42EFA31C200F4A26F /* Products */,
 			);
@@ -111,11 +114,12 @@
 				};
 			};
 			buildConfigurationList = E4A647CE2EFA31C200F4A26F /* Build configuration list for PBXProject "EarthLord" */;
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = E4A647CA2EFA31C200F4A26F;
 			minimizedProjectReferenceProxies = 1;
@@ -138,6 +142,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E4F6E3312F04D1450048E392 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -214,6 +219,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
@@ -271,6 +277,7 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;

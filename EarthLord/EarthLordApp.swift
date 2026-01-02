@@ -13,6 +13,9 @@ struct EarthLordApp: App {
     /// 认证管理器
     @StateObject private var authManager = AuthManager.shared
 
+    /// 语言管理器
+    @StateObject private var languageManager = LanguageManager.shared
+
     /// 是否显示启动页
     @State private var showSplash = true
 
@@ -39,6 +42,7 @@ struct EarthLordApp: App {
                         .transition(.opacity)
                 }
             }
+            .id(languageManager.languageRefreshID)
             .animation(.easeInOut(duration: 0.3), value: showSplash)
             .animation(.easeInOut(duration: 0.3), value: authManager.isAuthenticated)
             .animation(.easeInOut(duration: 0.3), value: authManager.needsPasswordSetup)
@@ -51,6 +55,9 @@ struct EarthLordApp: App {
                 print("🔗 [App] 收到 URL 回调: \(url)")
                 GIDSignIn.sharedInstance.handle(url)
             }
+            .environment(\.locale, languageManager.currentLanguage == .system
+                ? Locale.current
+                : Locale(identifier: languageManager.currentLanguage.rawValue))
         }
     }
 }
