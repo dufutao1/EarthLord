@@ -53,7 +53,10 @@ struct MapTabView: View {
         MapViewRepresentable(
             userLocation: $userLocation,
             hasLocatedUser: $hasLocatedUser,
-            centerCoordinate: $centerCoordinate
+            centerCoordinate: $centerCoordinate,
+            trackingPath: $locationManager.pathCoordinates,
+            pathUpdateVersion: locationManager.pathUpdateVersion,
+            isTracking: locationManager.isTracking
         )
         .ignoresSafeArea()
     }
@@ -72,14 +75,17 @@ struct MapTabView: View {
             Spacer()
 
             // 底部按钮区域
-            HStack {
+            HStack(spacing: 12) {
                 Spacer()
+
+                // 圈地按钮
+                claimTerritoryButton
 
                 // 定位按钮
                 locationButton
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 120)
             }
+            .padding(.trailing, 16)
+            .padding(.bottom, 120)
         }
     }
 
@@ -189,6 +195,47 @@ struct MapTabView: View {
         )
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+    }
+
+    // MARK: - 圈地按钮
+
+    private var claimTerritoryButton: some View {
+        Button {
+            if locationManager.isTracking {
+                // 停止圈地
+                print("📍 [地图] 停止圈地")
+                locationManager.stopPathTracking()
+            } else {
+                // 开始圈地
+                print("📍 [地图] 开始圈地")
+                locationManager.startPathTracking()
+
+                // 显示坐标信息卡片
+                withAnimation {
+                    showCoordinateInfo = true
+                }
+            }
+        } label: {
+            ZStack {
+                // 背景圆形
+                Circle()
+                    .fill(locationManager.isTracking ?
+                          ApocalypseTheme.primary.opacity(0.95) :
+                          ApocalypseTheme.cardBackground.opacity(0.95))
+                    .frame(width: 50, height: 50)
+                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+
+                // 图标
+                Image(systemName: locationManager.isTracking ? "stop.fill" : "flag.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(
+                        locationManager.isTracking ?
+                        .white : ApocalypseTheme.primary
+                    )
+            }
+        }
+        .disabled(!locationManager.isAuthorized)
+        .opacity(locationManager.isAuthorized ? 1.0 : 0.5)
     }
 
     // MARK: - 定位按钮

@@ -23,6 +23,15 @@ struct MapViewRepresentable: UIViewRepresentable {
     /// 地图中心位置（可选，用于外部控制）
     @Binding var centerCoordinate: CLLocationCoordinate2D?
 
+    /// 轨迹坐标数组（用于绘制路径）
+    @Binding var trackingPath: [CLLocationCoordinate2D]
+
+    /// 轨迹更新版本号（用于触发重绘）
+    var pathUpdateVersion: Int
+
+    /// 是否正在追踪
+    var isTracking: Bool
+
     // MARK: - UIViewRepresentable
 
     func makeUIView(context: Context) -> MKMapView {
@@ -82,6 +91,32 @@ struct MapViewRepresentable: UIViewRepresentable {
                 self.centerCoordinate = nil
             }
         }
+
+        // 更新轨迹路径
+        updateTrackingPath(on: mapView, context: context)
+    }
+
+    /// 更新轨迹路径
+    private func updateTrackingPath(on mapView: MKMapView, context: Context) {
+        // 检查版本号是否有变化
+        guard context.coordinator.lastPathVersion != pathUpdateVersion else { return }
+        context.coordinator.lastPathVersion = pathUpdateVersion
+
+        // 移除旧的轨迹覆盖物
+        let existingOverlays = mapView.overlays.filter { $0 is MKPolyline }
+        mapView.removeOverlays(existingOverlays)
+
+        // 如果没有轨迹点，不绘制
+        guard trackingPath.count >= 2 else { return }
+
+        // 将 WGS-84 坐标转换为 GCJ-02 坐标（修正中国地图偏移）
+        let convertedCoordinates = CoordinateConverter.convertPath(trackingPath)
+
+        // 创建折线
+        let polyline = MKPolyline(coordinates: convertedCoordinates, count: convertedCoordinates.count)
+        mapView.addOverlay(polyline)
+
+        print("🗺️ [地图] 更新轨迹，共 \(trackingPath.count) 个点")
     }
 
     func makeCoordinator() -> Coordinator {
@@ -116,6 +151,9 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         /// 首次居中标志（防止重复居中）
         private var hasInitialCentered = false
+
+        /// 上次更新的轨迹版本号（用于避免重复更新）
+        var lastPathVersion: Int = -1
 
         init(_ parent: MapViewRepresentable) {
             self.parent = parent
@@ -188,6 +226,28 @@ struct MapViewRepresentable: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, didFailToLocateUserWithError error: Error) {
             print("🗺️ [地图] 定位用户失败: \(error.localizedDescription)")
         }
+
+        /// ⭐ 关键方法：渲染覆盖物（轨迹线）
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let polyline = overlay as? MKPolyline {
+                let renderer = MKPolylineRenderer(polyline: polyline)
+
+                // 末世风格：橙红色轨迹线
+                renderer.strokeColor = UIColor(ApocalypseTheme.primary).withAlphaComponent(0.8)
+                renderer.lineWidth = 4.0
+                renderer.lineCap = .round
+                renderer.lineJoin = .round
+
+                // 如果正在追踪，使用虚线效果
+                if parent.isTracking {
+                    renderer.lineDashPattern = [8, 4]  // 8像素实线，4像素间隔
+                }
+
+                return renderer
+            }
+
+            return MKOverlayRenderer(overlay: overlay)
+        }
     }
 }
 
@@ -197,6 +257,9 @@ struct MapViewRepresentable: UIViewRepresentable {
     MapViewRepresentable(
         userLocation: .constant(nil),
         hasLocatedUser: .constant(false),
-        centerCoordinate: .constant(nil)
+        centerCoordinate: .constant(nil),
+        trackingPath: .constant([]),
+        pathUpdateVersion: 0,
+        isTracking: false
     )
 }

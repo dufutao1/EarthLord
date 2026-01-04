@@ -4,6 +4,7 @@
 //
 //  GPS 定位管理器
 //  负责请求定位权限、获取用户位置、处理定位错误
+//  支持路径追踪功能（圈地）
 //
 
 import Foundation
@@ -31,10 +32,31 @@ final class LocationManager: NSObject, ObservableObject {
     /// 是否正在定位
     @Published var isUpdatingLocation: Bool = false
 
+    /// 是否正在记录轨迹（圈地模式）
+    @Published var isTracking: Bool = false
+
+    /// 轨迹坐标数组（WGS-84 原始坐标）
+    @Published var pathCoordinates: [CLLocationCoordinate2D] = []
+
+    /// 轨迹更新版本号（用于触发地图重绘）
+    @Published var pathUpdateVersion: Int = 0
+
     // MARK: - 私有属性
 
     /// CoreLocation 定位管理器
     private let locationManager = CLLocationManager()
+
+    /// 当前位置（用于 Timer 访问）
+    private var currentLocation: CLLocation?
+
+    /// 轨迹采样定时器
+    private var pathUpdateTimer: Timer?
+
+    /// 最小记录距离（米）- 防止原地抖动产生过多点
+    private let minimumRecordDistance: CLLocationDistance = 3.0
+
+    /// 轨迹采样间隔（秒）
+    private let pathSamplingInterval: TimeInterval = 1.0
 
     // MARK: - 计算属性
 
@@ -124,6 +146,105 @@ final class LocationManager: NSObject, ObservableObject {
             startUpdatingLocation()
         }
     }
+
+    // MARK: - 轨迹追踪方法
+
+    /// 开始记录轨迹（圈地模式）
+    func startPathTracking() {
+        guard isAuthorized else {
+            print("📍 [轨迹] 未授权，无法开始记录轨迹")
+            locationError = "未获得定位权限"
+            return
+        }
+
+        guard !isTracking else {
+            print("📍 [轨迹] 已在记录中，忽略重复调用")
+            return
+        }
+
+        print("📍 [轨迹] 开始记录轨迹...")
+        isTracking = true
+
+        // 清空之前的轨迹
+        clearPath()
+
+        // 确保定位服务已开启
+        if !isUpdatingLocation {
+            startUpdatingLocation()
+        }
+
+        // 设置更高精度的定位参数
+        locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        locationManager.distanceFilter = 1  // 1米更新一次
+
+        // 记录起始点
+        if let location = currentLocation {
+            recordPathPoint(location)
+        }
+
+        // 启动定时采样器
+        pathUpdateTimer = Timer.scheduledTimer(withTimeInterval: pathSamplingInterval, repeats: true) { [weak self] _ in
+            self?.sampleCurrentLocation()
+        }
+    }
+
+    /// 停止记录轨迹
+    func stopPathTracking() {
+        guard isTracking else {
+            print("📍 [轨迹] 未在记录中，忽略停止调用")
+            return
+        }
+
+        print("📍 [轨迹] 停止记录轨迹，共记录 \(pathCoordinates.count) 个点")
+        isTracking = false
+
+        // 停止定时器
+        pathUpdateTimer?.invalidate()
+        pathUpdateTimer = nil
+
+        // 恢复正常定位参数
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = 10
+
+        // 更新版本号，触发轨迹重绘（从虚线变为实线）
+        pathUpdateVersion += 1
+    }
+
+    /// 清空轨迹
+    func clearPath() {
+        print("📍 [轨迹] 清空轨迹")
+        pathCoordinates.removeAll()
+        pathUpdateVersion += 1
+    }
+
+    /// 记录当前位置到轨迹
+    /// - Parameter location: 位置
+    private func recordPathPoint(_ location: CLLocation) {
+        let coordinate = location.coordinate
+
+        // 检查与上一个点的距离，防止原地抖动
+        if let lastCoordinate = pathCoordinates.last {
+            let lastLocation = CLLocation(latitude: lastCoordinate.latitude, longitude: lastCoordinate.longitude)
+            let distance = location.distance(from: lastLocation)
+
+            if distance < minimumRecordDistance {
+                // 距离太近，忽略这个点
+                return
+            }
+        }
+
+        // 记录坐标
+        pathCoordinates.append(coordinate)
+        pathUpdateVersion += 1
+
+        print("📍 [轨迹] 记录点 #\(pathCoordinates.count): (\(String(format: "%.6f", coordinate.latitude)), \(String(format: "%.6f", coordinate.longitude)))")
+    }
+
+    /// 采样当前位置（定时器回调）
+    private func sampleCurrentLocation() {
+        guard isTracking, let location = currentLocation else { return }
+        recordPathPoint(location)
+    }
 }
 
 // MARK: - CLLocationManagerDelegate
@@ -156,6 +277,9 @@ extension LocationManager: CLLocationManagerDelegate {
 
         let coordinate = location.coordinate
         print("📍 [定位] 获取到位置: (\(coordinate.latitude), \(coordinate.longitude))")
+
+        // 存储当前位置（用于 Timer 采样）
+        self.currentLocation = location
 
         DispatchQueue.main.async {
             self.userLocation = coordinate
