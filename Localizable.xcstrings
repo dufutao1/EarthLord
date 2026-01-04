@@ -125,6 +125,16 @@
         }
       }
     },
+    "前往设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Go to Settings"
+          }
+        }
+      }
+    },
     "取消" : {
       "localizations" : {
         "en" : {
@@ -206,6 +216,16 @@
         }
       }
     },
+    "当前坐标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current Location"
+          }
+        }
+      }
+    },
     "忘记密码？" : {
       "localizations" : {
         "en" : {
@@ -267,11 +287,22 @@
       }
     },
     "探索和圈占领地" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Explore and claim territories"
+          }
+        }
+      }
+    },
+    "无法获取位置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to get location"
           }
         }
       }
@@ -312,6 +343,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Checking login status..."
+          }
+        }
+      }
+    },
+    "正在获取位置..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Getting location..."
           }
         }
       }
@@ -437,6 +478,26 @@
         }
       }
     },
+    "纬度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Latitude"
+          }
+        }
+      }
+    },
+    "经度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Longitude"
+          }
+        }
+      }
+    },
     "设置" : {
       "localizations" : {
         "en" : {
@@ -473,6 +534,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Language"
+          }
+        }
+      }
+    },
+    "请允许定位权限" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please allow location access"
+          }
+        }
+      }
+    },
+    "请在设置中允许《地球新主》访问您的位置，以便在末日世界中显示您的坐标。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please allow Earth Lord to access your location in Settings to display your coordinates in the apocalyptic world."
           }
         }
       }
@@ -605,6 +686,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Resend"
+          }
+        }
+      }
+    },
+    "需要定位权限" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Location Permission Required"
           }
         }
       }
