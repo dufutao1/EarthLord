@@ -16,6 +16,9 @@ struct EarthLordApp: App {
     /// 语言管理器
     @StateObject private var languageManager = LanguageManager.shared
 
+    /// 定位管理器
+    @StateObject private var locationManager = LocationManager.shared
+
     /// 是否显示启动页
     @State private var showSplash = true
 
@@ -58,6 +61,7 @@ struct EarthLordApp: App {
             .environment(\.locale, languageManager.currentLanguage == .system
                 ? Locale.current
                 : Locale(identifier: languageManager.currentLanguage.rawValue))
+            .environmentObject(locationManager)
         }
     }
 }

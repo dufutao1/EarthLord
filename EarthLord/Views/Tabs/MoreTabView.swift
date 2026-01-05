@@ -2,18 +2,17 @@
 //  MoreTabView.swift
 //  EarthLord
 //
-//  Created by taozi on 2025/12/23.
+//  更多功能页面
+//  包含测试入口和其他功能
 //
 
 import SwiftUI
 
 struct MoreTabView: View {
     var body: some View {
-        PlaceholderView(
-            icon: "ellipsis",
-            title: "更多",
-            subtitle: "更多功能模块"
-        )
+        NavigationStack {
+            TestMenuView()
+        }
     }
 }
 
