@@ -4,6 +4,7 @@
 //
 //  MKMapView 的 SwiftUI 包装器
 //  负责显示地图、应用末世滤镜、处理用户位置居中
+//  支持轨迹变色和闭环后的多边形填充
 //
 
 import SwiftUI
@@ -31,6 +32,9 @@ struct MapViewRepresentable: UIViewRepresentable {
 
     /// 是否正在追踪
     var isTracking: Bool
+
+    /// 轨迹是否已闭环
+    var isPathClosed: Bool
 
     // MARK: - UIViewRepresentable
 
@@ -102,8 +106,8 @@ struct MapViewRepresentable: UIViewRepresentable {
         guard context.coordinator.lastPathVersion != pathUpdateVersion else { return }
         context.coordinator.lastPathVersion = pathUpdateVersion
 
-        // 移除旧的轨迹覆盖物
-        let existingOverlays = mapView.overlays.filter { $0 is MKPolyline }
+        // 移除旧的轨迹覆盖物（折线和多边形）
+        let existingOverlays = mapView.overlays.filter { $0 is MKPolyline || $0 is MKPolygon }
         mapView.removeOverlays(existingOverlays)
 
         // 如果没有轨迹点，不绘制
@@ -112,11 +116,18 @@ struct MapViewRepresentable: UIViewRepresentable {
         // 将 WGS-84 坐标转换为 GCJ-02 坐标（修正中国地图偏移）
         let convertedCoordinates = CoordinateConverter.convertPath(trackingPath)
 
-        // 创建折线
+        // 如果已闭环且点数足够，创建多边形填充
+        if isPathClosed && convertedCoordinates.count >= 3 {
+            let polygon = MKPolygon(coordinates: convertedCoordinates, count: convertedCoordinates.count)
+            mapView.addOverlay(polygon)
+            print("🗺️ [地图] 添加闭环多边形，共 \(convertedCoordinates.count) 个点")
+        }
+
+        // 创建折线（轨迹边框）
         let polyline = MKPolyline(coordinates: convertedCoordinates, count: convertedCoordinates.count)
         mapView.addOverlay(polyline)
 
-        print("🗺️ [地图] 更新轨迹，共 \(trackingPath.count) 个点")
+        print("🗺️ [地图] 更新轨迹，共 \(trackingPath.count) 个点，闭环: \(isPathClosed)")
     }
 
     func makeCoordinator() -> Coordinator {
@@ -227,21 +238,46 @@ struct MapViewRepresentable: UIViewRepresentable {
             print("🗺️ [地图] 定位用户失败: \(error.localizedDescription)")
         }
 
-        /// ⭐ 关键方法：渲染覆盖物（轨迹线）
+        /// ⭐ 关键方法：渲染覆盖物（轨迹线 + 多边形）
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            // 渲染多边形（闭环区域填充）
+            if let polygon = overlay as? MKPolygon {
+                let renderer = MKPolygonRenderer(polygon: polygon)
+
+                // 闭环成功：半透明绿色填充
+                renderer.fillColor = UIColor.systemGreen.withAlphaComponent(0.25)
+                renderer.strokeColor = UIColor.systemGreen
+                renderer.lineWidth = 3.0
+
+                print("🗺️ [地图] 渲染闭环多边形（绿色填充）")
+                return renderer
+            }
+
+            // 渲染折线（轨迹边框）
             if let polyline = overlay as? MKPolyline {
                 let renderer = MKPolylineRenderer(polyline: polyline)
 
-                // 末世风格：橙红色轨迹线
-                renderer.strokeColor = UIColor(ApocalypseTheme.primary).withAlphaComponent(0.8)
-                renderer.lineWidth = 4.0
+                // 根据闭环状态选择颜色
+                if parent.isPathClosed {
+                    // 已闭环：绿色轨迹线
+                    renderer.strokeColor = UIColor.systemGreen.withAlphaComponent(0.9)
+                    renderer.lineWidth = 4.0
+                    print("🗺️ [地图] 渲染闭环轨迹（绿色）")
+                } else if parent.isTracking {
+                    // 追踪中：青色虚线
+                    renderer.strokeColor = UIColor.systemCyan.withAlphaComponent(0.8)
+                    renderer.lineWidth = 4.0
+                    renderer.lineDashPattern = [8, 4]  // 8像素实线，4像素间隔
+                    print("🗺️ [地图] 渲染追踪轨迹（青色虚线）")
+                } else {
+                    // 停止追踪但未闭环：青色实线
+                    renderer.strokeColor = UIColor.systemCyan.withAlphaComponent(0.8)
+                    renderer.lineWidth = 4.0
+                    print("🗺️ [地图] 渲染停止轨迹（青色实线）")
+                }
+
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
-
-                // 如果正在追踪，使用虚线效果
-                if parent.isTracking {
-                    renderer.lineDashPattern = [8, 4]  // 8像素实线，4像素间隔
-                }
 
                 return renderer
             }
@@ -260,6 +296,7 @@ struct MapViewRepresentable: UIViewRepresentable {
         centerCoordinate: .constant(nil),
         trackingPath: .constant([]),
         pathUpdateVersion: 0,
-        isTracking: false
+        isTracking: false,
+        isPathClosed: false
     )
 }

@@ -56,7 +56,8 @@ struct MapTabView: View {
             centerCoordinate: $centerCoordinate,
             trackingPath: $locationManager.pathCoordinates,
             pathUpdateVersion: locationManager.pathUpdateVersion,
-            isTracking: locationManager.isTracking
+            isTracking: locationManager.isTracking,
+            isPathClosed: locationManager.isPathClosed
         )
         .ignoresSafeArea()
     }
@@ -65,14 +66,29 @@ struct MapTabView: View {
 
     private var overlayLayer: some View {
         VStack {
+            // 速度警告横幅
+            if let warning = locationManager.speedWarning {
+                speedWarningBanner(message: warning)
+                    .padding(.top, 50)
+                    .padding(.horizontal, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // 顶部坐标信息卡片
             if showCoordinateInfo {
                 coordinateInfoCard
-                    .padding(.top, 60)
+                    .padding(.top, locationManager.speedWarning != nil ? 8 : 60)
                     .padding(.horizontal, 16)
             }
 
             Spacer()
+
+            // 闭环成功提示
+            if locationManager.isPathClosed {
+                closureSuccessBanner
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
 
             // 底部按钮区域
             HStack(spacing: 12) {
@@ -87,6 +103,56 @@ struct MapTabView: View {
             .padding(.trailing, 16)
             .padding(.bottom, 120)
         }
+        .animation(.easeInOut(duration: 0.3), value: locationManager.speedWarning)
+        .animation(.easeInOut(duration: 0.3), value: locationManager.isPathClosed)
+    }
+
+    // MARK: - 速度警告横幅
+
+    private func speedWarningBanner(message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: locationManager.isTracking ? "exclamationmark.triangle.fill" : "xmark.octagon.fill")
+                .font(.system(size: 16))
+
+            Text(message)
+                .font(.system(size: 13, weight: .medium))
+
+            Spacer()
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            // 追踪中用黄色警告，停止追踪用红色
+            (locationManager.isTracking ? Color.orange : Color.red)
+                .opacity(0.95)
+        )
+        .cornerRadius(10)
+        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+
+    // MARK: - 闭环成功横幅
+
+    private var closureSuccessBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 16))
+
+            Text("圈地成功！领土已占领")
+                .font(.system(size: 13, weight: .medium))
+
+            Spacer()
+
+            Text("\(locationManager.pathCoordinates.count) 个点")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.8))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.green.opacity(0.95))
+        .cornerRadius(10)
+        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - 坐标信息卡片
