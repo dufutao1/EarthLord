@@ -83,6 +83,14 @@ struct MapTabView: View {
 
             Spacer()
 
+            // 可闭环提示横幅
+            if locationManager.canClosePath {
+                canCloseBanner
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             // 领地验证结果提示（闭环后显示）
             if locationManager.isPathClosed {
                 validationResultBanner
@@ -93,6 +101,12 @@ struct MapTabView: View {
             // 底部按钮区域
             HStack(spacing: 12) {
                 Spacer()
+
+                // 闭环确认按钮（可闭环时显示）
+                if locationManager.canClosePath {
+                    closePathButton
+                        .transition(.scale.combined(with: .opacity))
+                }
 
                 // 圈地按钮
                 claimTerritoryButton
@@ -106,6 +120,7 @@ struct MapTabView: View {
         .animation(.easeInOut(duration: 0.3), value: locationManager.speedWarning)
         .animation(.easeInOut(duration: 0.3), value: locationManager.isPathClosed)
         .animation(.easeInOut(duration: 0.3), value: locationManager.territoryValidationPassed)
+        .animation(.easeInOut(duration: 0.3), value: locationManager.canClosePath)
     }
 
     // MARK: - 速度警告横幅
@@ -130,6 +145,48 @@ struct MapTabView: View {
         )
         .cornerRadius(10)
         .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+
+    // MARK: - 可闭环提示横幅
+
+    private var canCloseBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16))
+
+            Text("可以闭环！点击绿色按钮确认占领")
+                .font(.system(size: 13, weight: .medium))
+
+            Spacer()
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.blue.opacity(0.95))
+        .cornerRadius(10)
+        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+
+    // MARK: - 闭环确认按钮
+
+    private var closePathButton: some View {
+        Button {
+            print("📍 [地图] 用户点击闭环确认")
+            locationManager.confirmPathClosure()
+        } label: {
+            ZStack {
+                // 背景圆形 - 绿色高亮
+                Circle()
+                    .fill(Color.green.opacity(0.95))
+                    .frame(width: 50, height: 50)
+                    .shadow(color: Color.green.opacity(0.5), radius: 6, x: 0, y: 2)
+
+                // 图标 - 勾选
+                Image(systemName: "checkmark")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+            }
+        }
     }
 
     // MARK: - 领地验证结果横幅

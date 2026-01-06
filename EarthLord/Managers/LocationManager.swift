@@ -44,6 +44,9 @@ final class LocationManager: NSObject, ObservableObject {
     /// 轨迹是否已闭环（走回起点）
     @Published var isPathClosed: Bool = false
 
+    /// 是否可以闭环（满足所有条件，等待用户确认）
+    @Published var canClosePath: Bool = false
+
     /// 速度警告信息
     @Published var speedWarning: String?
 
@@ -217,6 +220,7 @@ final class LocationManager: NSObject, ObservableObject {
 
         // 重置闭环状态
         isPathClosed = false
+        canClosePath = false
 
         // 重置验证状态
         territoryValidationPassed = false
@@ -338,7 +342,7 @@ final class LocationManager: NSObject, ObservableObject {
 
     // MARK: - 闭环检测
 
-    /// 检查轨迹是否闭环（走回起点）
+    /// 检查是否满足闭环条件（不自动闭环，只更新 canClosePath 状态）
     /// 闭环条件：点数 >= 10 且 总距离 >= 50m 且 面积 >= 100m² 且 距起点 <= 30m
     private func checkPathClosure() {
         // 已经闭环则不再检查
@@ -346,27 +350,28 @@ final class LocationManager: NSObject, ObservableObject {
 
         // 条件1：检查点数是否足够（>= 10）
         guard pathCoordinates.count >= minimumPathPoints else {
-            print("📍 [闭环] 点数不足: \(pathCoordinates.count)/\(minimumPathPoints)")
+            canClosePath = false
             return
         }
 
         // 条件2：检查总距离是否足够（>= 50m）
         let totalDistance = calculateTotalPathDistance()
         guard totalDistance >= minimumTotalDistance else {
-            print("📍 [闭环] 总距离不足: \(String(format: "%.1f", totalDistance))m/\(minimumTotalDistance)m")
+            canClosePath = false
             return
         }
 
         // 条件3：检查面积是否足够（>= 100m²）
         let area = calculatePolygonArea()
         guard area >= minimumEnclosedArea else {
-            print("📍 [闭环] 面积不足: \(String(format: "%.1f", area))m²/\(minimumEnclosedArea)m²")
+            canClosePath = false
             return
         }
 
         // 获取起点和当前点
         guard let startPoint = pathCoordinates.first,
               let currentPoint = pathCoordinates.last else {
+            canClosePath = false
             return
         }
 
@@ -375,28 +380,55 @@ final class LocationManager: NSObject, ObservableObject {
         let currentLocation = CLLocation(latitude: currentPoint.latitude, longitude: currentPoint.longitude)
         let distanceToStart = currentLocation.distance(from: startLocation)
 
-        print("📍 [闭环] 总距离: \(String(format: "%.1f", totalDistance))m, 面积: \(String(format: "%.1f", area))m², 距起点: \(String(format: "%.1f", distanceToStart))m (阈值: \(closureDistanceThreshold)m)")
-
-        // 记录日志（满足点数、距离、面积条件后）
-        TerritoryLogger.shared.log("总距离 \(String(format: "%.1f", totalDistance))m, 面积 \(String(format: "%.0f", area))m², 距起点 \(String(format: "%.1f", distanceToStart))m (需≤\(Int(closureDistanceThreshold))m)", type: .info)
-
-        // 条件4：判断是否闭环（距起点 <= 30m）
+        // 条件4：判断是否在闭环范围内（距起点 <= 30m）
         if distanceToStart <= closureDistanceThreshold {
-            print("📍 [闭环] ✅ 闭环检测成功！总距离 \(String(format: "%.1f", totalDistance))m, 面积 \(String(format: "%.1f", area))m², 距起点 \(String(format: "%.1f", distanceToStart))m")
+            // 满足所有条件，可以闭环
+            if !canClosePath {
+                // 首次进入可闭环范围，记录日志
+                print("📍 [闭环] ✅ 可以闭环！面积 \(String(format: "%.0f", area))m², 距起点 \(String(format: "%.1f", distanceToStart))m")
+                TerritoryLogger.shared.log("可以闭环！面积 \(String(format: "%.0f", area))m², 点击按钮确认", type: .success)
+            }
+            canClosePath = true
+        } else {
+            // 离开闭环范围
+            if canClosePath {
+                print("📍 [闭环] ⚠️ 离开闭环范围，距起点 \(String(format: "%.1f", distanceToStart))m")
+                TerritoryLogger.shared.log("离开闭环范围，距起点 \(String(format: "%.1f", distanceToStart))m", type: .warning)
+            }
+            canClosePath = false
+        }
+    }
 
-            // 记录成功日志
-            TerritoryLogger.shared.log("闭环成功！面积 \(String(format: "%.0f", area))m²", type: .success)
+    /// 用户确认闭环（手动触发）
+    func confirmPathClosure() {
+        // 检查是否满足闭环条件
+        guard canClosePath else {
+            print("📍 [闭环] ❌ 当前不满足闭环条件")
+            TerritoryLogger.shared.log("闭环失败：不满足闭环条件", type: .error)
+            return
+        }
 
-            isPathClosed = true
-            pathUpdateVersion += 1  // 触发地图重绘
+        let area = calculatePolygonArea()
+        let totalDistance = calculateTotalPathDistance()
 
-            // 自动停止追踪
-            stopPathTracking()
+        print("📍 [闭环] ✅ 用户确认闭环！面积 \(String(format: "%.0f", area))m²")
+        TerritoryLogger.shared.log("用户确认闭环！面积 \(String(format: "%.0f", area))m²", type: .success)
 
-            // 闭环后触发领地验证（主要检测自交）
-            let validationResult = validateTerritory()
-            territoryValidationPassed = validationResult.isValid
-            territoryValidationError = validationResult.errorMessage
+        isPathClosed = true
+        canClosePath = false
+        pathUpdateVersion += 1  // 触发地图重绘
+
+        // 停止追踪
+        stopPathTracking()
+
+        // 触发领地验证（主要检测自交）
+        let validationResult = validateTerritory()
+        territoryValidationPassed = validationResult.isValid
+        territoryValidationError = validationResult.errorMessage
+
+        // 记录最终结果
+        if validationResult.isValid {
+            TerritoryLogger.shared.log("🎉 领地占领成功！面积 \(String(format: "%.0f", area))m²", type: .success)
         }
     }
 
