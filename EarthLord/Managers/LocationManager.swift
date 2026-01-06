@@ -339,7 +339,7 @@ final class LocationManager: NSObject, ObservableObject {
     // MARK: - 闭环检测
 
     /// 检查轨迹是否闭环（走回起点）
-    /// 闭环条件：点数 >= 10 且 总距离 >= 50m 且 距起点 <= 30m
+    /// 闭环条件：点数 >= 10 且 总距离 >= 50m 且 面积 >= 100m² 且 距起点 <= 30m
     private func checkPathClosure() {
         // 已经闭环则不再检查
         guard !isPathClosed else { return }
@@ -357,6 +357,13 @@ final class LocationManager: NSObject, ObservableObject {
             return
         }
 
+        // 条件3：检查面积是否足够（>= 100m²）
+        let area = calculatePolygonArea()
+        guard area >= minimumEnclosedArea else {
+            print("📍 [闭环] 面积不足: \(String(format: "%.1f", area))m²/\(minimumEnclosedArea)m²")
+            return
+        }
+
         // 获取起点和当前点
         guard let startPoint = pathCoordinates.first,
               let currentPoint = pathCoordinates.last else {
@@ -368,17 +375,17 @@ final class LocationManager: NSObject, ObservableObject {
         let currentLocation = CLLocation(latitude: currentPoint.latitude, longitude: currentPoint.longitude)
         let distanceToStart = currentLocation.distance(from: startLocation)
 
-        print("📍 [闭环] 总距离: \(String(format: "%.1f", totalDistance))m, 距起点: \(String(format: "%.1f", distanceToStart))m (阈值: \(closureDistanceThreshold)m)")
+        print("📍 [闭环] 总距离: \(String(format: "%.1f", totalDistance))m, 面积: \(String(format: "%.1f", area))m², 距起点: \(String(format: "%.1f", distanceToStart))m (阈值: \(closureDistanceThreshold)m)")
 
-        // 记录日志（满足点数和距离条件后）
-        TerritoryLogger.shared.log("总距离 \(String(format: "%.1f", totalDistance))m, 距起点 \(String(format: "%.1f", distanceToStart))m (需≤\(Int(closureDistanceThreshold))m)", type: .info)
+        // 记录日志（满足点数、距离、面积条件后）
+        TerritoryLogger.shared.log("总距离 \(String(format: "%.1f", totalDistance))m, 面积 \(String(format: "%.0f", area))m², 距起点 \(String(format: "%.1f", distanceToStart))m (需≤\(Int(closureDistanceThreshold))m)", type: .info)
 
-        // 条件3：判断是否闭环（距起点 <= 30m）
+        // 条件4：判断是否闭环（距起点 <= 30m）
         if distanceToStart <= closureDistanceThreshold {
-            print("📍 [闭环] ✅ 闭环检测成功！总距离 \(String(format: "%.1f", totalDistance))m, 距起点 \(String(format: "%.1f", distanceToStart))m")
+            print("📍 [闭环] ✅ 闭环检测成功！总距离 \(String(format: "%.1f", totalDistance))m, 面积 \(String(format: "%.1f", area))m², 距起点 \(String(format: "%.1f", distanceToStart))m")
 
             // 记录成功日志
-            TerritoryLogger.shared.log("闭环成功！总距离 \(String(format: "%.1f", totalDistance))m, 距起点 \(String(format: "%.1f", distanceToStart))m", type: .success)
+            TerritoryLogger.shared.log("闭环成功！面积 \(String(format: "%.0f", area))m²", type: .success)
 
             isPathClosed = true
             pathUpdateVersion += 1  // 触发地图重绘
@@ -386,7 +393,7 @@ final class LocationManager: NSObject, ObservableObject {
             // 自动停止追踪
             stopPathTracking()
 
-            // 闭环后触发领地验证
+            // 闭环后触发领地验证（主要检测自交）
             let validationResult = validateTerritory()
             territoryValidationPassed = validationResult.isValid
             territoryValidationError = validationResult.errorMessage
