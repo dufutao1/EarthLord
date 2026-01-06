@@ -339,13 +339,21 @@ final class LocationManager: NSObject, ObservableObject {
     // MARK: - 闭环检测
 
     /// 检查轨迹是否闭环（走回起点）
+    /// 闭环条件：点数 >= 10 且 总距离 >= 50m 且 距起点 <= 30m
     private func checkPathClosure() {
         // 已经闭环则不再检查
         guard !isPathClosed else { return }
 
-        // 检查点数是否足够
+        // 条件1：检查点数是否足够（>= 10）
         guard pathCoordinates.count >= minimumPathPoints else {
             print("📍 [闭环] 点数不足: \(pathCoordinates.count)/\(minimumPathPoints)")
+            return
+        }
+
+        // 条件2：检查总距离是否足够（>= 50m）
+        let totalDistance = calculateTotalPathDistance()
+        guard totalDistance >= minimumTotalDistance else {
+            print("📍 [闭环] 总距离不足: \(String(format: "%.1f", totalDistance))m/\(minimumTotalDistance)m")
             return
         }
 
@@ -360,17 +368,17 @@ final class LocationManager: NSObject, ObservableObject {
         let currentLocation = CLLocation(latitude: currentPoint.latitude, longitude: currentPoint.longitude)
         let distanceToStart = currentLocation.distance(from: startLocation)
 
-        print("📍 [闭环] 距起点: \(String(format: "%.1f", distanceToStart))m (阈值: \(closureDistanceThreshold)m)")
+        print("📍 [闭环] 总距离: \(String(format: "%.1f", totalDistance))m, 距起点: \(String(format: "%.1f", distanceToStart))m (阈值: \(closureDistanceThreshold)m)")
 
-        // 记录日志（点数 ≥10 且未闭环时）
-        TerritoryLogger.shared.log("距起点 \(String(format: "%.1f", distanceToStart))m (需≤\(Int(closureDistanceThreshold))m)", type: .info)
+        // 记录日志（满足点数和距离条件后）
+        TerritoryLogger.shared.log("总距离 \(String(format: "%.1f", totalDistance))m, 距起点 \(String(format: "%.1f", distanceToStart))m (需≤\(Int(closureDistanceThreshold))m)", type: .info)
 
-        // 判断是否闭环
+        // 条件3：判断是否闭环（距起点 <= 30m）
         if distanceToStart <= closureDistanceThreshold {
-            print("📍 [闭环] ✅ 闭环检测成功！距离起点 \(String(format: "%.1f", distanceToStart))m")
+            print("📍 [闭环] ✅ 闭环检测成功！总距离 \(String(format: "%.1f", totalDistance))m, 距起点 \(String(format: "%.1f", distanceToStart))m")
 
             // 记录成功日志
-            TerritoryLogger.shared.log("闭环成功！距起点 \(String(format: "%.1f", distanceToStart))m", type: .success)
+            TerritoryLogger.shared.log("闭环成功！总距离 \(String(format: "%.1f", totalDistance))m, 距起点 \(String(format: "%.1f", distanceToStart))m", type: .success)
 
             isPathClosed = true
             pathUpdateVersion += 1  // 触发地图重绘
