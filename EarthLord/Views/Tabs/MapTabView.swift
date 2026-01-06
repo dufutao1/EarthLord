@@ -83,9 +83,9 @@ struct MapTabView: View {
 
             Spacer()
 
-            // 闭环成功提示
+            // 领地验证结果提示（闭环后显示）
             if locationManager.isPathClosed {
-                closureSuccessBanner
+                validationResultBanner
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
             }
@@ -105,6 +105,7 @@ struct MapTabView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: locationManager.speedWarning)
         .animation(.easeInOut(duration: 0.3), value: locationManager.isPathClosed)
+        .animation(.easeInOut(duration: 0.3), value: locationManager.territoryValidationPassed)
     }
 
     // MARK: - 速度警告横幅
@@ -131,28 +132,68 @@ struct MapTabView: View {
         .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
     }
 
-    // MARK: - 闭环成功横幅
+    // MARK: - 领地验证结果横幅
 
-    private var closureSuccessBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 16))
+    private var validationResultBanner: some View {
+        Group {
+            if locationManager.territoryValidationPassed {
+                // 验证成功 - 绿色横幅
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 16))
 
-            Text("圈地成功！领土已占领")
-                .font(.system(size: 13, weight: .medium))
+                    Text("圈地成功！领土已占领")
+                        .font(.system(size: 13, weight: .medium))
 
-            Spacer()
+                    Spacer()
 
-            Text("\(locationManager.pathCoordinates.count) 个点")
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.8))
+                    // 显示面积
+                    Text(formatArea(locationManager.calculatedArea))
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.green.opacity(0.95))
+                .cornerRadius(10)
+                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+            } else {
+                // 验证失败 - 红色横幅
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.seal.fill")
+                        .font(.system(size: 16))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("领地验证失败")
+                            .font(.system(size: 13, weight: .medium))
+
+                        if let error = locationManager.territoryValidationError {
+                            Text(error)
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+
+                    Spacer()
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.red.opacity(0.95))
+                .cornerRadius(10)
+                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+            }
         }
-        .foregroundColor(.white)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.green.opacity(0.95))
-        .cornerRadius(10)
-        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+
+    /// 格式化面积显示
+    private func formatArea(_ area: Double) -> String {
+        if area >= 1_000_000 {
+            return String(format: "%.2f km²", area / 1_000_000)
+        } else {
+            return String(format: "%.0f m²", area)
+        }
     }
 
     // MARK: - 坐标信息卡片

@@ -50,6 +50,17 @@ final class LocationManager: NSObject, ObservableObject {
     /// 是否超速
     @Published var isOverSpeed: Bool = false
 
+    // MARK: - 验证状态属性
+
+    /// 领地验证是否通过
+    @Published var territoryValidationPassed: Bool = false
+
+    /// 领地验证错误信息
+    @Published var territoryValidationError: String? = nil
+
+    /// 计算得到的领地面积（平方米）
+    @Published var calculatedArea: Double = 0
+
     // MARK: - 私有属性
 
     /// CoreLocation 定位管理器
@@ -72,6 +83,12 @@ final class LocationManager: NSObject, ObservableObject {
 
     /// 最少路径点数 - 至少需要多少个点才能判断闭环
     private let minimumPathPoints: Int = 10
+
+    /// 最小行走距离（米）
+    private let minimumTotalDistance: Double = 50.0
+
+    /// 最小领地面积（平方米）
+    private let minimumEnclosedArea: Double = 100.0
 
     /// 速度警告阈值（km/h）
     private let speedWarningThreshold: Double = 15.0
@@ -200,6 +217,11 @@ final class LocationManager: NSObject, ObservableObject {
 
         // 重置闭环状态
         isPathClosed = false
+
+        // 重置验证状态
+        territoryValidationPassed = false
+        territoryValidationError = nil
+        calculatedArea = 0
 
         // 重置速度检测状态
         speedWarning = nil
@@ -355,6 +377,11 @@ final class LocationManager: NSObject, ObservableObject {
 
             // 自动停止追踪
             stopPathTracking()
+
+            // 闭环后触发领地验证
+            let validationResult = validateTerritory()
+            territoryValidationPassed = validationResult.isValid
+            territoryValidationError = validationResult.errorMessage
         }
     }
 
@@ -434,6 +461,192 @@ final class LocationManager: NSObject, ObservableObject {
         }
 
         return true
+    }
+
+    // MARK: - 距离与面积计算
+
+    /// 计算轨迹总距离
+    /// - Returns: 总距离（米）
+    private func calculateTotalPathDistance() -> Double {
+        guard pathCoordinates.count >= 2 else { return 0 }
+
+        var totalDistance: Double = 0
+
+        for i in 0..<(pathCoordinates.count - 1) {
+            let current = pathCoordinates[i]
+            let next = pathCoordinates[i + 1]
+
+            let currentLocation = CLLocation(latitude: current.latitude, longitude: current.longitude)
+            let nextLocation = CLLocation(latitude: next.latitude, longitude: next.longitude)
+
+            totalDistance += currentLocation.distance(from: nextLocation)
+        }
+
+        return totalDistance
+    }
+
+    /// 计算多边形面积（使用鞋带公式，考虑地球曲率）
+    /// - Returns: 面积（平方米）
+    private func calculatePolygonArea() -> Double {
+        guard pathCoordinates.count >= 3 else { return 0 }
+
+        // 地球半径（米）
+        let earthRadius: Double = 6371000
+
+        var area: Double = 0
+
+        for i in 0..<pathCoordinates.count {
+            let current = pathCoordinates[i]
+            let next = pathCoordinates[(i + 1) % pathCoordinates.count]  // 循环取点
+
+            // 经纬度转弧度
+            let lat1 = current.latitude * .pi / 180
+            let lon1 = current.longitude * .pi / 180
+            let lat2 = next.latitude * .pi / 180
+            let lon2 = next.longitude * .pi / 180
+
+            // 鞋带公式（球面修正）
+            area += (lon2 - lon1) * (2 + sin(lat1) + sin(lat2))
+        }
+
+        // 取绝对值并计算最终面积
+        area = abs(area * earthRadius * earthRadius / 2.0)
+
+        return area
+    }
+
+    // MARK: - 自相交检测
+
+    /// 判断两线段是否相交（使用 CCW 算法）
+    /// - Parameters:
+    ///   - p1: 第一条线段起点
+    ///   - p2: 第一条线段终点
+    ///   - p3: 第二条线段起点
+    ///   - p4: 第二条线段终点
+    /// - Returns: true = 相交
+    private func segmentsIntersect(p1: CLLocationCoordinate2D, p2: CLLocationCoordinate2D,
+                                   p3: CLLocationCoordinate2D, p4: CLLocationCoordinate2D) -> Bool {
+        /// CCW 辅助函数：判断三点是否逆时针排列
+        /// 坐标映射：longitude = X轴，latitude = Y轴
+        func ccw(_ A: CLLocationCoordinate2D, _ B: CLLocationCoordinate2D, _ C: CLLocationCoordinate2D) -> Bool {
+            // 叉积 = (Cy - Ay) × (Bx - Ax) - (By - Ay) × (Cx - Ax)
+            let crossProduct = (C.latitude - A.latitude) * (B.longitude - A.longitude) -
+                               (B.latitude - A.latitude) * (C.longitude - A.longitude)
+            return crossProduct > 0
+        }
+
+        // 判断两线段是否相交：
+        // ccw(p1, p3, p4) ≠ ccw(p2, p3, p4) 且 ccw(p1, p2, p3) ≠ ccw(p1, p2, p4)
+        return ccw(p1, p3, p4) != ccw(p2, p3, p4) && ccw(p1, p2, p3) != ccw(p1, p2, p4)
+    }
+
+    /// 检测轨迹是否自相交
+    /// - Returns: true = 存在自交
+    func hasPathSelfIntersection() -> Bool {
+        // ✅ 防御性检查：至少需要4个点才可能自交
+        guard pathCoordinates.count >= 4 else { return false }
+
+        // ✅ 创建路径快照的深拷贝，避免并发修改问题
+        let pathSnapshot = Array(pathCoordinates)
+
+        // ✅ 再次检查快照是否有效
+        guard pathSnapshot.count >= 4 else { return false }
+
+        let segmentCount = pathSnapshot.count - 1
+
+        // ✅ 防御性检查：确保有足够的线段
+        guard segmentCount >= 2 else { return false }
+
+        // ✅ 闭环时需要跳过的首尾线段数量（防止正常圈地被误判为自交）
+        let skipHeadCount = 2
+        let skipTailCount = 2
+
+        for i in 0..<segmentCount {
+            // ✅ 循环内索引检查
+            guard i < pathSnapshot.count - 1 else { break }
+
+            let p1 = pathSnapshot[i]
+            let p2 = pathSnapshot[i + 1]
+
+            // 对比每条非相邻线段
+            let startJ = i + 2
+            guard startJ < segmentCount else { continue }
+
+            for j in startJ..<segmentCount {
+                // ✅ 循环内索引检查
+                guard j < pathSnapshot.count - 1 else { break }
+
+                // ✅ 跳过首尾附近线段的比较（防止闭环时误判）
+                let isHeadSegment = i < skipHeadCount
+                let isTailSegment = j >= segmentCount - skipTailCount
+
+                if isHeadSegment && isTailSegment {
+                    continue
+                }
+
+                let p3 = pathSnapshot[j]
+                let p4 = pathSnapshot[j + 1]
+
+                if segmentsIntersect(p1: p1, p2: p2, p3: p3, p4: p4) {
+                    TerritoryLogger.shared.log("自交检测: 线段\(i)-\(i+1) 与 线段\(j)-\(j+1) 相交", type: .error)
+                    return true
+                }
+            }
+        }
+
+        TerritoryLogger.shared.log("自交检测: 无交叉 ✓", type: .info)
+        return false
+    }
+
+    // MARK: - 综合验证
+
+    /// 综合验证领地是否有效
+    /// - Returns: (isValid: 是否有效, errorMessage: 错误信息)
+    func validateTerritory() -> (isValid: Bool, errorMessage: String?) {
+        TerritoryLogger.shared.log("开始领地验证", type: .info)
+
+        // 1. 点数检查
+        let pointCount = pathCoordinates.count
+        if pointCount < minimumPathPoints {
+            let error = "点数不足: \(pointCount)个 (需≥\(minimumPathPoints)个)"
+            TerritoryLogger.shared.log("点数检查: \(error)", type: .error)
+            TerritoryLogger.shared.log("领地验证失败！\(error)", type: .error)
+            return (false, error)
+        }
+        TerritoryLogger.shared.log("点数检查: \(pointCount)个点 ✓", type: .info)
+
+        // 2. 距离检查
+        let totalDistance = calculateTotalPathDistance()
+        if totalDistance < minimumTotalDistance {
+            let error = "距离不足: \(String(format: "%.0f", totalDistance))m (需≥\(Int(minimumTotalDistance))m)"
+            TerritoryLogger.shared.log("距离检查: \(error)", type: .error)
+            TerritoryLogger.shared.log("领地验证失败！\(error)", type: .error)
+            return (false, error)
+        }
+        TerritoryLogger.shared.log("距离检查: \(String(format: "%.0f", totalDistance))m ✓", type: .info)
+
+        // 3. 自交检测
+        if hasPathSelfIntersection() {
+            let error = "轨迹自相交，请勿画8字形"
+            TerritoryLogger.shared.log("领地验证失败！\(error)", type: .error)
+            return (false, error)
+        }
+
+        // 4. 面积检查
+        let area = calculatePolygonArea()
+        if area < minimumEnclosedArea {
+            let error = "面积不足: \(String(format: "%.0f", area))m² (需≥\(Int(minimumEnclosedArea))m²)"
+            TerritoryLogger.shared.log("面积检查: \(error)", type: .error)
+            TerritoryLogger.shared.log("领地验证失败！\(error)", type: .error)
+            return (false, error)
+        }
+        TerritoryLogger.shared.log("面积检查: \(String(format: "%.0f", area))m² ✓", type: .info)
+
+        // 保存计算的面积
+        calculatedArea = area
+
+        TerritoryLogger.shared.log("领地验证通过！面积: \(String(format: "%.0f", area))m²", type: .success)
+        return (true, nil)
     }
 }
 
