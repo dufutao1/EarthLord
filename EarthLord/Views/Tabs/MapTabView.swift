@@ -8,6 +8,7 @@
 
 import SwiftUI
 import MapKit
+import Supabase
 
 struct MapTabView: View {
 
@@ -28,6 +29,18 @@ struct MapTabView: View {
     /// 是否显示坐标信息
     @State private var showCoordinateInfo: Bool = true
 
+    /// 是否正在上传领地
+    @State private var isUploading: Bool = false
+
+    /// 上传结果消息
+    @State private var uploadMessage: String? = nil
+
+    /// 是否显示上传结果
+    @State private var showUploadResult: Bool = false
+
+    /// 已加载的领地列表
+    @State private var territories: [Territory] = []
+
     var body: some View {
         ZStack {
             // 地图层
@@ -44,6 +57,11 @@ struct MapTabView: View {
         .onAppear {
             // 页面出现时检查并请求权限
             locationManager.checkAndRequestPermission()
+
+            // 加载领地
+            Task {
+                await loadTerritories()
+            }
         }
     }
 
@@ -57,7 +75,9 @@ struct MapTabView: View {
             trackingPath: $locationManager.pathCoordinates,
             pathUpdateVersion: locationManager.pathUpdateVersion,
             isTracking: locationManager.isTracking,
-            isPathClosed: locationManager.isPathClosed
+            isPathClosed: locationManager.isPathClosed,
+            territories: territories,
+            currentUserId: supabase.auth.currentUser?.id.uuidString
         )
         .ignoresSafeArea()
     }
@@ -194,20 +214,46 @@ struct MapTabView: View {
     private var validationResultBanner: some View {
         Group {
             if locationManager.territoryValidationPassed {
-                // 验证成功 - 绿色横幅
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 16))
+                // 验证成功 - 绿色横幅 + 确认登记按钮
+                VStack(spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 16))
 
-                    Text("圈地成功！领土已占领")
-                        .font(.system(size: 13, weight: .medium))
+                        Text("圈地成功！")
+                            .font(.system(size: 13, weight: .medium))
 
-                    Spacer()
+                        Spacer()
 
-                    // 显示面积
-                    Text(formatArea(locationManager.calculatedArea))
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.8))
+                        // 显示面积
+                        Text(formatArea(locationManager.calculatedArea))
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+
+                    // 确认登记按钮
+                    Button {
+                        Task {
+                            await uploadCurrentTerritory()
+                        }
+                    } label: {
+                        HStack {
+                            if isUploading {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "icloud.and.arrow.up")
+                            }
+                            Text(isUploading ? "上传中..." : "确认登记领地")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.2))
+                        .cornerRadius(8)
+                    }
+                    .disabled(isUploading)
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 12)
@@ -491,6 +537,63 @@ struct MapTabView: View {
     private func openAppSettings() {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(url)
+        }
+    }
+
+    /// 上传当前领地
+    private func uploadCurrentTerritory() async {
+        // 再次检查验证状态
+        guard locationManager.territoryValidationPassed else {
+            uploadMessage = "领地验证未通过，无法上传"
+            showUploadResult = true
+            return
+        }
+
+        // 检查坐标数据
+        guard !locationManager.pathCoordinates.isEmpty else {
+            uploadMessage = "没有坐标数据"
+            showUploadResult = true
+            return
+        }
+
+        // 开始上传
+        isUploading = true
+
+        do {
+            try await TerritoryManager.shared.uploadTerritory(
+                coordinates: locationManager.pathCoordinates,
+                area: locationManager.calculatedArea,
+                startTime: locationManager.trackingStartTime ?? Date()
+            )
+
+            // 上传成功
+            uploadMessage = "领地登记成功！"
+            showUploadResult = true
+            print("📤 [地图] 领地上传成功，重置状态")
+
+            // 重置领地状态
+            locationManager.resetTerritoryState()
+
+            // 刷新领地列表
+            await loadTerritories()
+
+        } catch {
+            // 上传失败
+            uploadMessage = "上传失败: \(error.localizedDescription)"
+            showUploadResult = true
+            print("📤 [地图] 领地上传失败: \(error)")
+        }
+
+        isUploading = false
+    }
+
+    /// 加载所有领地
+    private func loadTerritories() async {
+        do {
+            territories = try await TerritoryManager.shared.loadAllTerritories()
+            TerritoryLogger.shared.log("加载了 \(territories.count) 个领地", type: .info)
+        } catch {
+            TerritoryLogger.shared.log("加载领地失败: \(error.localizedDescription)", type: .error)
         }
     }
 }

@@ -105,6 +105,9 @@ final class LocationManager: NSObject, ObservableObject {
     /// 上次位置（用于计算速度）
     private var lastRecordedLocation: CLLocation?
 
+    /// 开始追踪的时间
+    private(set) var trackingStartTime: Date?
+
     // MARK: - 计算属性
 
     /// 是否已授权定位（包括"使用时"和"始终"）
@@ -212,6 +215,9 @@ final class LocationManager: NSObject, ObservableObject {
         print("📍 [轨迹] 开始记录轨迹...")
         isTracking = true
 
+        // 记录开始时间
+        trackingStartTime = Date()
+
         // 记录日志
         TerritoryLogger.shared.log("开始圈地追踪", type: .info)
 
@@ -283,6 +289,35 @@ final class LocationManager: NSObject, ObservableObject {
         print("📍 [轨迹] 清空轨迹")
         pathCoordinates.removeAll()
         pathUpdateVersion += 1
+    }
+
+    /// 重置所有领地相关状态（上传成功后调用）
+    func resetTerritoryState() {
+        print("📍 [轨迹] 重置所有领地状态")
+
+        // 停止追踪（如果还在追踪）
+        if isTracking {
+            stopPathTracking()
+        }
+
+        // 清空轨迹
+        pathCoordinates.removeAll()
+        pathUpdateVersion += 1
+
+        // 重置闭环状态
+        isPathClosed = false
+        canClosePath = false
+
+        // 重置验证状态
+        territoryValidationPassed = false
+        territoryValidationError = nil
+        calculatedArea = 0
+
+        // 重置追踪时间
+        trackingStartTime = nil
+
+        // 记录日志
+        TerritoryLogger.shared.log("领地状态已重置", type: .info)
     }
 
     /// 记录当前位置到轨迹
