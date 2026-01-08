@@ -82,7 +82,7 @@ final class LocationManager: NSObject, ObservableObject {
     private let pathSamplingInterval: TimeInterval = 1.0
 
     /// 闭环距离阈值（米）- 距离起点多近算闭环
-    private let closureDistanceThreshold: CLLocationDistance = 30.0
+    private let closureDistanceThreshold: CLLocationDistance = 15.0
 
     /// 最少路径点数 - 至少需要多少个点才能判断闭环
     private let minimumPathPoints: Int = 10
@@ -398,10 +398,6 @@ final class LocationManager: NSObject, ObservableObject {
 
         // 条件3：检查面积是否足够（>= 100m²）
         let area = calculatePolygonArea()
-        guard area >= minimumEnclosedArea else {
-            canClosePath = false
-            return
-        }
 
         // 获取起点和当前点
         guard let startPoint = pathCoordinates.first,
@@ -414,6 +410,21 @@ final class LocationManager: NSObject, ObservableObject {
         let startLocation = CLLocation(latitude: startPoint.latitude, longitude: startPoint.longitude)
         let currentLocation = CLLocation(latitude: currentPoint.latitude, longitude: currentPoint.longitude)
         let distanceToStart = currentLocation.distance(from: startLocation)
+
+        // 每10个点输出一次状态，帮助调试
+        if pathCoordinates.count % 10 == 0 {
+            TerritoryLogger.shared.log("状态: 距离\(String(format: "%.0f", totalDistance))m, 面积\(String(format: "%.0f", area))m², 距起点\(String(format: "%.0f", distanceToStart))m", type: .info)
+        }
+
+        // 条件3：检查面积是否足够（>= 100m²）
+        guard area >= minimumEnclosedArea else {
+            // 如果距起点已经很近但面积不够，提示用户
+            if distanceToStart <= closureDistanceThreshold {
+                TerritoryLogger.shared.log("面积不足: \(String(format: "%.0f", area))m² (需≥100m²)", type: .warning)
+            }
+            canClosePath = false
+            return
+        }
 
         // 条件4：判断是否在闭环范围内（距起点 <= 30m）
         if distanceToStart <= closureDistanceThreshold {
@@ -481,6 +492,20 @@ final class LocationManager: NSObject, ObservableObject {
             return true
         }
 
+        // ⚠️ GPS 预热期：前5个点不检测速度（GPS 刚启动定位不准）
+        if pathCoordinates.count < 5 {
+            lastRecordedLocation = newLocation
+            lastLocationTimestamp = Date()
+            return true
+        }
+
+        // ⚠️ GPS 精度检查：精度差于20米时不检测速度
+        if newLocation.horizontalAccuracy > 20 || lastLocation.horizontalAccuracy > 20 {
+            lastRecordedLocation = newLocation
+            lastLocationTimestamp = Date()
+            return true
+        }
+
         // 计算距离（米）
         let distance = newLocation.distance(from: lastLocation)
 
@@ -494,7 +519,7 @@ final class LocationManager: NSObject, ObservableObject {
         let speedMps = distance / timeInterval
         let speedKmh = speedMps * 3.6
 
-        print("📍 [速度] \(String(format: "%.1f", speedKmh)) km/h (距离: \(String(format: "%.1f", distance))m, 时间: \(String(format: "%.1f", timeInterval))s)")
+        print("📍 [速度] \(String(format: "%.1f", speedKmh)) km/h (距离: \(String(format: "%.1f", distance))m, 时间: \(String(format: "%.1f", timeInterval))s, 精度: \(String(format: "%.0f", newLocation.horizontalAccuracy))m)")
 
         // 检查是否超过停止阈值（30 km/h）
         if speedKmh > speedStopThreshold {
@@ -622,6 +647,13 @@ final class LocationManager: NSObject, ObservableObject {
         return ccw(p1, p3, p4) != ccw(p2, p3, p4) && ccw(p1, p2, p3) != ccw(p1, p2, p4)
     }
 
+    /// 计算两点之间的距离（米）
+    private func distanceBetween(_ p1: CLLocationCoordinate2D, _ p2: CLLocationCoordinate2D) -> Double {
+        let loc1 = CLLocation(latitude: p1.latitude, longitude: p1.longitude)
+        let loc2 = CLLocation(latitude: p2.latitude, longitude: p2.longitude)
+        return loc1.distance(from: loc2)
+    }
+
     /// 检测轨迹是否自相交
     /// - Returns: true = 存在自交
     func hasPathSelfIntersection() -> Bool {
@@ -642,6 +674,11 @@ final class LocationManager: NSObject, ObservableObject {
         // ✅ 闭环时需要跳过的首尾线段数量（防止正常圈地被误判为自交）
         let skipHeadCount = 2
         let skipTailCount = 2
+
+        // ✅ GPS误差容忍度：如果两条线段的端点都相距超过此距离，认为是GPS误差导致的假交叉
+        // 只有端点距离 < 3米（GPS精度范围内）才认为用户真的在同一地点走过两次
+        // 如果端点距离 > 3米，认为是GPS漂移导致的假交叉
+        let gpsErrorTolerance: Double = 3.0  // 米
 
         for i in 0..<segmentCount {
             // ✅ 循环内索引检查
@@ -670,6 +707,21 @@ final class LocationManager: NSObject, ObservableObject {
                 let p4 = pathSnapshot[j + 1]
 
                 if segmentsIntersect(p1: p1, p2: p2, p3: p3, p4: p4) {
+                    // ✅ 检查是否是GPS误差导致的假交叉
+                    // 计算两条线段端点之间的最小距离
+                    let d1_3 = distanceBetween(p1, p3)
+                    let d1_4 = distanceBetween(p1, p4)
+                    let d2_3 = distanceBetween(p2, p3)
+                    let d2_4 = distanceBetween(p2, p4)
+                    let minDistance = min(d1_3, d1_4, d2_3, d2_4)
+
+                    // 如果所有端点都相距较远（>5米），说明用户从未在同一地点经过两次
+                    // 这种情况下的"交叉"是GPS误差导致的，不是真正的8字形
+                    if minDistance > gpsErrorTolerance {
+                        print("📍 [自交] 线段\(i)-\(i+1) 与 线段\(j)-\(j+1) 数学上相交，但端点最小距离 \(String(format: "%.1f", minDistance))m > \(gpsErrorTolerance)m，判定为GPS误差，忽略")
+                        TerritoryLogger.shared.log("检测到疑似GPS误差交叉，已忽略（距离\(String(format: "%.0f", minDistance))m）", type: .info)
+                        continue  // 忽略这个假交叉
+                    }
                     TerritoryLogger.shared.log("自交检测: 线段\(i)-\(i+1) 与 线段\(j)-\(j+1) 相交", type: .error)
                     return true
                 }

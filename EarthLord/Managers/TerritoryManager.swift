@@ -196,11 +196,35 @@ final class TerritoryManager {
             .select()
             .eq("user_id", value: userId.uuidString)
             .eq("is_active", value: true)
+            .order("created_at", ascending: false)
             .execute()
             .value
 
         print("📥 [领地] ✅ 加载完成，共 \(response.count) 个领地")
         return response
+    }
+
+    // MARK: - 删除方法
+
+    /// 删除领地
+    /// - Parameter territoryId: 领地 ID
+    /// - Returns: 是否删除成功
+    func deleteTerritory(territoryId: String) async -> Bool {
+        print("🗑️ [领地] 开始删除领地: \(territoryId)")
+
+        do {
+            try await supabase
+                .from("territories")
+                .delete()
+                .eq("id", value: territoryId)
+                .execute()
+
+            print("🗑️ [领地] ✅ 领地删除成功")
+            return true
+        } catch {
+            print("🗑️ [领地] ❌ 领地删除失败: \(error.localizedDescription)")
+            return false
+        }
     }
 }
 

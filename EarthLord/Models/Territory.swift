@@ -68,4 +68,38 @@ struct Territory: Codable, Identifiable {
             return CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
     }
+
+    // MARK: - 计算属性
+
+    /// 格式化面积显示
+    var formattedArea: String {
+        if area >= 1_000_000 {
+            return String(format: "%.2f km²", area / 1_000_000)
+        } else {
+            return String(format: "%.0f m²", area)
+        }
+    }
+
+    /// 显示名称（如果没有名称则显示默认值）
+    var displayName: String {
+        return name ?? "未命名领地"
+    }
+
+    /// 格式化创建时间
+    var formattedDate: String {
+        guard let dateStr = completedAt ?? createdAt else {
+            return "未知时间"
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        if let date = formatter.date(from: dateStr) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+            return displayFormatter.string(from: date)
+        }
+
+        return dateStr
+    }
 }
