@@ -88,7 +88,37 @@ struct MapTabView: View {
             if locationManager.isDenied {
                 permissionDeniedView
             }
+
+            // POI 接近弹窗
+            if explorationManager.showPOIPopup, let poi = explorationManager.currentProximityPOI {
+                POIProximityPopup(
+                    poi: poi,
+                    onScavenge: {
+                        Task {
+                            await explorationManager.scavengePOI()
+                        }
+                    },
+                    onDismiss: {
+                        explorationManager.dismissPOIPopup()
+                    }
+                )
+                .transition(.opacity)
+            }
+
+            // 搜刮结果视图
+            if explorationManager.showScavengeResult, let items = explorationManager.scavengeResult {
+                ScavengeResultView(
+                    poiName: explorationManager.scavengedPOIName,
+                    items: items,
+                    onConfirm: {
+                        explorationManager.dismissScavengeResult()
+                    }
+                )
+                .transition(.opacity)
+            }
         }
+        .animation(.easeInOut(duration: 0.3), value: explorationManager.showPOIPopup)
+        .animation(.easeInOut(duration: 0.3), value: explorationManager.showScavengeResult)
         .onAppear {
             // 页面出现时检查并请求权限
             locationManager.checkAndRequestPermission()
@@ -112,7 +142,9 @@ struct MapTabView: View {
             isTracking: locationManager.isTracking,
             isPathClosed: locationManager.isPathClosed,
             territories: territories,
-            currentUserId: supabase.auth.currentUser?.id.uuidString
+            currentUserId: supabase.auth.currentUser?.id.uuidString,
+            nearbyPOIs: explorationManager.nearbyPOIs,
+            scavengedPOIIds: explorationManager.scavengedPOIIds
         )
         .ignoresSafeArea()
     }
@@ -147,14 +179,6 @@ struct MapTabView: View {
 
             Spacer()
 
-            // 探索状态横幅
-            if explorationManager.isExploring {
-                explorationStatusBanner
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
             // 可闭环提示横幅
             if locationManager.canClosePath {
                 canCloseBanner
@@ -170,27 +194,10 @@ struct MapTabView: View {
                     .padding(.bottom, 8)
             }
 
-            // 底部按钮区域
-            HStack(spacing: 12) {
-                Spacer()
-
-                // 闭环确认按钮（可闭环时显示）
-                if locationManager.canClosePath {
-                    closePathButton
-                        .transition(.scale.combined(with: .opacity))
-                }
-
-                // 探索按钮
-                exploreButton
-
-                // 圈地按钮
-                claimTerritoryButton
-
-                // 定位按钮
-                locationButton
-            }
-            .padding(.trailing, 16)
-            .padding(.bottom, 120)
+            // 底部控制面板
+            bottomControlPanel
+                .padding(.horizontal, 16)
+                .padding(.bottom, 100)
             .sheet(isPresented: $showExplorationResult) {
                 if let result = explorationResult {
                     ExplorationResultView(result: result)
@@ -594,89 +601,295 @@ struct MapTabView: View {
         .opacity(locationManager.isAuthorized ? 1.0 : 0.5)
     }
 
-    /// 探索状态横幅
-    private var explorationStatusBanner: some View {
-        // 根据是否超速决定背景颜色
-        let bannerColor: Color = explorationManager.showSpeedWarning ? .red : ApocalypseTheme.success
+    // MARK: - 底部控制面板
 
-        return HStack(spacing: 12) {
-            // 图标（超速时显示警告图标）
-            if explorationManager.showSpeedWarning {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(.yellow)
-                    .symbolEffect(.pulse, options: .repeating)
+    /// 底部控制面板（根据状态显示不同内容）
+    private var bottomControlPanel: some View {
+        VStack(spacing: 0) {
+            if explorationManager.isExploring {
+                // 探索中：显示探索状态面板
+                explorationStatusPanel
+            } else if locationManager.isTracking {
+                // 圈地中：显示圈地状态面板
+                claimingStatusPanel
             } else {
-                Image(systemName: "figure.walk")
-                    .font(.system(size: 18))
-                    .foregroundColor(.white)
-                    .symbolEffect(.pulse, options: .repeating)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                // 标题（超速时显示警告）
-                if explorationManager.showSpeedWarning {
-                    HStack(spacing: 4) {
-                        Text("⚠️ 超速警告!")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.yellow)
-                        Text("\(explorationManager.speedWarningCountdown)秒后停止")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                } else {
-                    Text("探索中...")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-
-                HStack(spacing: 12) {
-                    // 距离
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.left.and.right")
-                            .font(.system(size: 10))
-                        Text(formatExplorationDistance(explorationManager.currentDistance))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    }
-
-                    // 时长
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 10))
-                        Text(formatExplorationDuration(explorationManager.currentDuration))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    }
-
-                    // 速度（显示当前速度）
-                    HStack(spacing: 4) {
-                        Image(systemName: "speedometer")
-                            .font(.system(size: 10))
-                        Text(String(format: "%.1f km/h", explorationManager.currentSpeed))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundColor(explorationManager.showSpeedWarning ? .yellow : .white.opacity(0.9))
-                    }
-                }
-                .foregroundColor(.white.opacity(0.9))
-            }
-
-            Spacer()
-
-            // 结束按钮
-            Button(action: { stopExploration() }) {
-                Text("结束")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(explorationManager.showSpeedWarning ? .red : ApocalypseTheme.success)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.white)
-                    .cornerRadius(14)
+                // 默认：显示功能按钮
+                defaultButtonPanel
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(bannerColor.opacity(0.95))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.black.opacity(0.85))
+        )
+        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: -2)
+    }
+
+    /// 探索状态面板（匹配老师设计）
+    private var explorationStatusPanel: some View {
+        VStack(spacing: 12) {
+            // 顶部状态栏
+            HStack {
+                // 探索进行中标识
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(ApocalypseTheme.success)
+                        .frame(width: 8, height: 8)
+                    Text("探索进行中")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(ApocalypseTheme.success)
+                }
+
+                Spacer()
+
+                // 计时器
+                HStack(spacing: 4) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 12))
+                    Text(formatExplorationDuration(explorationManager.currentDuration))
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(ApocalypseTheme.textSecondary)
+            }
+
+            // 超速警告（如果有）
+            if explorationManager.showSpeedWarning {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.yellow)
+                    Text("超速警告! \(explorationManager.speedWarningCountdown)秒后停止")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.yellow)
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color.red.opacity(0.3))
+                .cornerRadius(8)
+            }
+
+            // 数据显示区
+            HStack(spacing: 0) {
+                // 行走距离
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("行走距离")
+                        .font(.system(size: 11))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+
+                    Text(formatDistanceLarge(explorationManager.currentDistance))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(ApocalypseTheme.textPrimary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // 分隔线
+                Rectangle()
+                    .fill(ApocalypseTheme.textMuted.opacity(0.3))
+                    .frame(width: 1, height: 40)
+
+                // 奖励等级
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("奖励等级")
+                        .font(.system(size: 11))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+
+                    Text(getRewardLevel(for: explorationManager.currentDistance))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(ApocalypseTheme.primary)
+
+                    Text("\(explorationManager.scavengedPOIIds.count) 件物品")
+                        .font(.system(size: 11))
+                        .foregroundColor(ApocalypseTheme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+
+            // 进度条
+            VStack(spacing: 4) {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        // 背景
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(ApocalypseTheme.textMuted.opacity(0.3))
+                            .frame(height: 6)
+
+                        // 进度
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(ApocalypseTheme.success)
+                            .frame(width: geometry.size.width * getProgressToNextLevel(explorationManager.currentDistance), height: 6)
+                    }
+                }
+                .frame(height: 6)
+
+                // 进度提示
+                Text(getProgressHint(for: explorationManager.currentDistance))
+                    .font(.system(size: 11))
+                    .foregroundColor(ApocalypseTheme.textMuted)
+            }
+
+            // 停止探索按钮
+            Button(action: { stopExploration() }) {
+                Text("停止探索")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.red)
+                    .cornerRadius(12)
+            }
+        }
+        .padding(16)
+    }
+
+    /// 圈地状态面板
+    private var claimingStatusPanel: some View {
+        VStack(spacing: 12) {
+            // 顶部状态栏
+            HStack {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(ApocalypseTheme.primary)
+                        .frame(width: 8, height: 8)
+                    Text("圈地进行中")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(ApocalypseTheme.primary)
+                }
+                Spacer()
+            }
+
+            // 圈地信息
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("轨迹点数")
+                        .font(.system(size: 11))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+                    Text("\(locationManager.pathCoordinates.count)")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(ApocalypseTheme.textPrimary)
+                }
+
+                Spacer()
+
+                // 闭环确认按钮
+                if locationManager.canClosePath {
+                    Button(action: {
+                        locationManager.confirmPathClosure()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("确认闭环")
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(ApocalypseTheme.success)
+                        .cornerRadius(10)
+                    }
+                }
+            }
+
+            // 停止圈地按钮
+            Button(action: {
+                stopCollisionMonitoring()
+                locationManager.stopPathTracking()
+            }) {
+                Text("停止圈地")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(ApocalypseTheme.primary)
+                    .cornerRadius(12)
+            }
+        }
+        .padding(16)
+    }
+
+    /// 默认按钮面板
+    private var defaultButtonPanel: some View {
+        HStack(spacing: 12) {
+            // 探索按钮
+            Button(action: { startExploration() }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "binoculars.fill")
+                        .font(.system(size: 18))
+                    Text("探索")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(ApocalypseTheme.success)
+                .cornerRadius(12)
+            }
+
+            // 圈地按钮
+            Button(action: {
+                startClaimingWithCollisionCheck()
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "flag.fill")
+                        .font(.system(size: 18))
+                    Text("圈地")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(ApocalypseTheme.primary)
+                .cornerRadius(12)
+            }
+
+            // 定位按钮
+            Button(action: {
+                if let location = userLocation {
+                    centerCoordinate = location
+                } else {
+                    locationManager.checkAndRequestPermission()
+                }
+            }) {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(ApocalypseTheme.primary)
+                    .frame(width: 50, height: 50)
+                    .background(ApocalypseTheme.cardBackground)
+                    .cornerRadius(12)
+            }
+        }
+        .padding(12)
+    }
+
+    // MARK: - 辅助方法
+
+    /// 格式化大数字距离显示
+    private func formatDistanceLarge(_ meters: Double) -> String {
+        if meters >= 1000 {
+            return String(format: "%.1fkm", meters / 1000)
+        }
+        return String(format: "%.0fm", meters)
+    }
+
+    /// 获取奖励等级
+    private func getRewardLevel(for distance: Double) -> String {
+        if distance >= 1000 { return "金级" }
+        if distance >= 500 { return "银级" }
+        if distance >= 200 { return "铜级" }
+        return "无奖励"
+    }
+
+    /// 获取到下一级的进度
+    private func getProgressToNextLevel(_ distance: Double) -> Double {
+        if distance >= 1000 { return 1.0 }
+        if distance >= 500 { return (distance - 500) / 500 }
+        if distance >= 200 { return (distance - 200) / 300 }
+        return distance / 200
+    }
+
+    /// 获取进度提示文字
+    private func getProgressHint(for distance: Double) -> String {
+        if distance >= 1000 { return "已达最高等级" }
+        if distance >= 500 { return "再走 \(Int(1000 - distance)) 米升级到 金级" }
+        if distance >= 200 { return "再走 \(Int(500 - distance)) 米升级到 银级" }
+        return "再走 \(Int(200 - distance)) 米升级到 铜级"
     }
 
     /// 开始探索

@@ -193,211 +193,65 @@ struct ResourcesTabView: View {
     }
 }
 
-// MARK: - POI 内容视图（去掉导航栏的版本）
+// MARK: - POI 内容视图
 
-/// 嵌入到资源页面的 POI 列表（不带自己的 NavigationStack）
+/// POI 页面 - 提示用户去地图探索
 struct POIContentView: View {
 
-    @State private var poiList: [POI] = MockExplorationData.mockPOIs
-    @State private var selectedCategory: POIType? = nil
-    @State private var isSearching: Bool = false
-
-    /// 搜索按钮缩放状态
-    @State private var searchButtonScale: CGFloat = 1.0
-
-    /// POI 列表出现动画状态
-    @State private var poiItemsVisible: [String: Bool] = [:]
-
-    /// 是否已触发过列表动画
-    @State private var hasAnimatedList: Bool = false
-
-    private let mockLatitude: Double = 22.54
-    private let mockLongitude: Double = 114.06
-
-    private var filteredPOIs: [POI] {
-        if let category = selectedCategory {
-            return poiList.filter { $0.type == category }
-        }
-        return poiList
-    }
-
-    private var discoveredCount: Int {
-        poiList.filter { $0.discoveryStatus == .discovered }.count
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            // 状态栏
-            statusBar
-
-            // 搜索按钮
-            searchButton
-
-            // 筛选工具栏
-            filterToolbar
-
-            // POI 列表
-            poiListView
-        }
-    }
-
-    private var statusBar: some View {
-        HStack {
-            HStack(spacing: 4) {
-                Image(systemName: "location.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(ApocalypseTheme.success)
-
-                Text(String(format: "%.2f, %.2f", mockLatitude, mockLongitude))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(ApocalypseTheme.textSecondary)
-            }
-
+        VStack(spacing: 24) {
             Spacer()
 
-            Text("附近发现 \(discoveredCount) 个地点")
-                .font(.system(size: 12))
-                .foregroundColor(ApocalypseTheme.textSecondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(ApocalypseTheme.cardBackground)
-    }
+            // 图标
+            Image(systemName: "map.fill")
+                .font(.system(size: 60))
+                .foregroundColor(ApocalypseTheme.primary.opacity(0.6))
 
-    private var searchButton: some View {
-        Button(action: {
-            // 按钮缩放动画
-            withAnimation(.easeInOut(duration: 0.1)) {
-                searchButtonScale = 0.95
+            // 标题
+            Text("探索发现 POI")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(ApocalypseTheme.textPrimary)
+
+            // 说明文字
+            VStack(spacing: 8) {
+                Text("在地图页面点击「探索」按钮")
+                Text("系统会自动搜索附近的兴趣点")
+                Text("走近 POI 50米范围内即可搜刮物资")
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-                    searchButtonScale = 1.0
+            .font(.system(size: 14))
+            .foregroundColor(ApocalypseTheme.textSecondary)
+            .multilineTextAlignment(.center)
+
+            // 提示卡片
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "1.circle.fill")
+                        .foregroundColor(ApocalypseTheme.primary)
+                    Text("点击地图页「探索」按钮开始")
+                        .foregroundColor(ApocalypseTheme.textPrimary)
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: "2.circle.fill")
+                        .foregroundColor(ApocalypseTheme.primary)
+                    Text("地图上会显示附近的 POI 标记")
+                        .foregroundColor(ApocalypseTheme.textPrimary)
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: "3.circle.fill")
+                        .foregroundColor(ApocalypseTheme.primary)
+                    Text("走近 POI 并点击搜刮获得物资")
+                        .foregroundColor(ApocalypseTheme.textPrimary)
                 }
             }
-
-            isSearching = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                isSearching = false
-                print("🔍 搜索完成")
-                // 重新触发列表动画
-                triggerListAnimation()
-            }
-        }) {
-            HStack(spacing: 10) {
-                if isSearching {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .scaleEffect(0.9)
-                    Text("搜索中...")
-                } else {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text("搜索附近POI")
-                }
-            }
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(isSearching ? ApocalypseTheme.textMuted : ApocalypseTheme.primary)
+            .font(.system(size: 13))
+            .padding(16)
+            .background(ApocalypseTheme.cardBackground)
             .cornerRadius(12)
-        }
-        .scaleEffect(searchButtonScale)
-        .disabled(isSearching)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
+            .padding(.horizontal, 32)
 
-    /// 触发 POI 列表依次出现动画
-    private func triggerListAnimation() {
-        // 先重置所有状态
-        poiItemsVisible = [:]
-
-        // 依次显示每个 POI
-        for (index, poi) in filteredPOIs.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.1) {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                    poiItemsVisible[poi.id] = true
-                }
-            }
+            Spacer()
         }
-    }
-
-    private var filterToolbar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                FilterChip(title: "全部", icon: "square.grid.2x2.fill", color: ApocalypseTheme.primary, isSelected: selectedCategory == nil) {
-                    selectedCategory = nil
-                }
-                FilterChip(title: "医院", icon: "cross.case.fill", color: .red, isSelected: selectedCategory == .hospital) {
-                    selectedCategory = .hospital
-                }
-                FilterChip(title: "超市", icon: "cart.fill", color: .green, isSelected: selectedCategory == .supermarket) {
-                    selectedCategory = .supermarket
-                }
-                FilterChip(title: "工厂", icon: "building.2.fill", color: .gray, isSelected: selectedCategory == .factory) {
-                    selectedCategory = .factory
-                }
-                FilterChip(title: "药店", icon: "pills.fill", color: .purple, isSelected: selectedCategory == .pharmacy) {
-                    selectedCategory = .pharmacy
-                }
-                FilterChip(title: "加油站", icon: "fuelpump.fill", color: .orange, isSelected: selectedCategory == .gasStation) {
-                    selectedCategory = .gasStation
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-        }
-        .background(ApocalypseTheme.cardBackground.opacity(0.5))
-    }
-
-    private var poiListView: some View {
-        Group {
-            if poiList.isEmpty {
-                // 完全没有POI的空状态
-                EmptyStateView(
-                    icon: "map",
-                    title: "附近暂无兴趣点",
-                    subtitle: "点击搜索按钮发现周围的废墟"
-                )
-            } else if filteredPOIs.isEmpty {
-                // 筛选后没有结果
-                EmptyStateView(
-                    icon: "mappin.slash",
-                    title: "没有找到该类型的地点",
-                    subtitle: "试试其他分类或清除筛选"
-                )
-            } else {
-                ScrollView {
-                    VStack(spacing: 12) {
-                        ForEach(filteredPOIs) { poi in
-                            // 使用 NavigationLink 跳转到详情页
-                            NavigationLink(destination: POIDetailView(poi: poi)) {
-                                POICard(poi: poi)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            // 依次出现动画
-                            .opacity(poiItemsVisible[poi.id] == true ? 1 : 0)
-                            .offset(y: poiItemsVisible[poi.id] == true ? 0 : 20)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
-            }
-        }
-        .onAppear {
-            // 首次出现时触发动画
-            if !hasAnimatedList {
-                hasAnimatedList = true
-                triggerListAnimation()
-            }
-        }
-        .onChange(of: selectedCategory) { _, _ in
-            // 切换分类时重新触发动画
-            triggerListAnimation()
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -794,6 +648,39 @@ struct InventoryItemCard: View {
         .padding(12)
         .background(ApocalypseTheme.cardBackground)
         .cornerRadius(12)
+    }
+}
+
+// MARK: - 分类筛选芯片
+
+/// 分类筛选按钮组件
+struct CategoryChip: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundColor(isSelected ? .white : ApocalypseTheme.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                isSelected ? color : ApocalypseTheme.cardBackground
+            )
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? color : ApocalypseTheme.textMuted.opacity(0.3), lineWidth: 1)
+            )
+        }
     }
 }
 

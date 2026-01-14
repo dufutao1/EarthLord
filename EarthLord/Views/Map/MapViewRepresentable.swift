@@ -42,6 +42,12 @@ struct MapViewRepresentable: UIViewRepresentable {
     /// 当前用户 ID
     var currentUserId: String?
 
+    /// 附近的 POI 列表
+    var nearbyPOIs: [SearchedPOI]
+
+    /// 已搜刮的 POI ID 集合
+    var scavengedPOIIds: Set<String>
+
     // MARK: - UIViewRepresentable
 
     func makeUIView(context: Context) -> MKMapView {
@@ -107,6 +113,9 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         // 绘制领地
         drawTerritories(on: mapView, context: context)
+
+        // 更新 POI 标记
+        updatePOIAnnotations(on: mapView, context: context)
     }
 
     /// 更新轨迹路径
@@ -147,6 +156,40 @@ struct MapViewRepresentable: UIViewRepresentable {
         mapView.addOverlay(polyline)
 
         print("🗺️ [地图] 更新轨迹，共 \(trackingPath.count) 个点，闭环: \(isPathClosed)")
+    }
+
+    /// 更新 POI 标记
+    private func updatePOIAnnotations(on mapView: MKMapView, context: Context) {
+        // 检查 POI 数量是否有变化
+        let currentPOICount = nearbyPOIs.count
+        let currentScavengedCount = scavengedPOIIds.count
+        let needsUpdate = context.coordinator.lastPOICount != currentPOICount ||
+                          context.coordinator.lastScavengedCount != currentScavengedCount
+
+        guard needsUpdate else { return }
+
+        context.coordinator.lastPOICount = currentPOICount
+        context.coordinator.lastScavengedCount = currentScavengedCount
+
+        // 移除旧的 POI 标记
+        let poiAnnotations = mapView.annotations.filter { $0 is POIAnnotation }
+        mapView.removeAnnotations(poiAnnotations)
+
+        // 如果没有 POI，直接返回
+        guard !nearbyPOIs.isEmpty else { return }
+
+        // 添加新的 POI 标记
+        // 注意：MapKit 搜索返回的 POI 坐标在中国已经是 GCJ-02，不需要再转换
+        for poi in nearbyPOIs {
+            let annotation = POIAnnotation(poi: poi)
+            annotation.isScavenged = scavengedPOIIds.contains(poi.id)
+            // 直接使用 POI 坐标，不做转换
+            annotation.coordinate = poi.coordinate
+
+            mapView.addAnnotation(annotation)
+        }
+
+        print("🗺️ [地图] 更新了 \(nearbyPOIs.count) 个 POI 标记")
     }
 
     /// 绘制领地多边形
@@ -228,6 +271,12 @@ struct MapViewRepresentable: UIViewRepresentable {
 
         /// 上次更新的领地数量（用于避免重复绘制）
         var lastTerritoriesCount: Int = -1
+
+        /// 上次更新的 POI 数量
+        var lastPOICount: Int = -1
+
+        /// 上次更新的已搜刮 POI 数量
+        var lastScavengedCount: Int = -1
 
         init(_ parent: MapViewRepresentable) {
             self.parent = parent
@@ -358,6 +407,172 @@ struct MapViewRepresentable: UIViewRepresentable {
 
             return MKOverlayRenderer(overlay: overlay)
         }
+
+        /// POI 标记视图
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            // 忽略用户位置标记
+            guard !(annotation is MKUserLocation) else { return nil }
+
+            // POI 标记
+            if let poiAnnotation = annotation as? POIAnnotation {
+                let identifier = "POIAnnotation"
+
+                // 创建自定义标记视图
+                let annotationView: MKAnnotationView
+                if let dequeuedView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) {
+                    dequeuedView.annotation = poiAnnotation
+                    annotationView = dequeuedView
+                } else {
+                    annotationView = MKAnnotationView(annotation: poiAnnotation, reuseIdentifier: identifier)
+                    annotationView.canShowCallout = false  // 使用自定义样式，不显示系统 callout
+                }
+
+                // 生成带气泡和文字标签的自定义图片
+                let customImage = createPOIMarkerImage(
+                    for: poiAnnotation.poi,
+                    isScavenged: poiAnnotation.isScavenged
+                )
+                annotationView.image = customImage
+
+                // 设置偏移（使气泡底部对准坐标点）
+                annotationView.centerOffset = CGPoint(x: 0, y: -(customImage?.size.height ?? 60) / 2)
+
+                // 设置透明度
+                annotationView.alpha = poiAnnotation.isScavenged ? 0.6 : 1.0
+
+                return annotationView
+            }
+
+            return nil
+        }
+
+        /// 创建 POI 标记图片（带气泡和文字标签）
+        private func createPOIMarkerImage(for poi: SearchedPOI, isScavenged: Bool) -> UIImage? {
+            // 配置尺寸
+            let bubbleSize: CGFloat = 36
+            let iconSize: CGFloat = 18
+            let labelFont = UIFont.systemFont(ofSize: 11, weight: .semibold)
+            let maxLabelWidth: CGFloat = 100
+
+            // 计算文字尺寸
+            let labelText = poi.name
+            let labelAttributes: [NSAttributedString.Key: Any] = [.font: labelFont]
+            let labelSize = (labelText as NSString).boundingRect(
+                with: CGSize(width: maxLabelWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                attributes: labelAttributes,
+                context: nil
+            ).size
+
+            // 计算总画布尺寸
+            let padding: CGFloat = 6
+            let labelPadding: CGFloat = 4
+            let totalWidth = max(bubbleSize, labelSize.width + labelPadding * 2)
+            let totalHeight = bubbleSize + 4 + labelSize.height + padding
+
+            // 选择颜色
+            let bubbleColor: UIColor = isScavenged ? .gray : poiColor(for: poi.category)
+
+            // 创建画布
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: totalWidth, height: totalHeight))
+            return renderer.image { context in
+                let ctx = context.cgContext
+
+                // 1. 绘制气泡圆形背景
+                let bubbleRect = CGRect(
+                    x: (totalWidth - bubbleSize) / 2,
+                    y: 0,
+                    width: bubbleSize,
+                    height: bubbleSize
+                )
+
+                // 气泡背景
+                ctx.setFillColor(bubbleColor.cgColor)
+                ctx.fillEllipse(in: bubbleRect)
+
+                // 2. 绘制图标
+                let iconConfig = UIImage.SymbolConfiguration(pointSize: iconSize, weight: .bold)
+                if let iconImage = UIImage(systemName: poi.category.icon, withConfiguration: iconConfig)?
+                    .withTintColor(.white, renderingMode: .alwaysOriginal) {
+                    let iconRect = CGRect(
+                        x: bubbleRect.midX - iconSize / 2,
+                        y: bubbleRect.midY - iconSize / 2,
+                        width: iconSize,
+                        height: iconSize
+                    )
+                    iconImage.draw(in: iconRect)
+                }
+
+                // 3. 绘制文字标签背景
+                let labelBgRect = CGRect(
+                    x: (totalWidth - labelSize.width - labelPadding * 2) / 2,
+                    y: bubbleSize + 4,
+                    width: labelSize.width + labelPadding * 2,
+                    height: labelSize.height + 2
+                )
+
+                // 标签背景（半透明黑色）
+                ctx.setFillColor(UIColor.black.withAlphaComponent(0.7).cgColor)
+                let labelBgPath = UIBezierPath(roundedRect: labelBgRect, cornerRadius: 4)
+                ctx.addPath(labelBgPath.cgPath)
+                ctx.fillPath()
+
+                // 4. 绘制文字
+                let textRect = CGRect(
+                    x: labelBgRect.origin.x + labelPadding,
+                    y: labelBgRect.origin.y + 1,
+                    width: labelSize.width,
+                    height: labelSize.height
+                )
+
+                let paragraphStyle = NSMutableParagraphStyle()
+                paragraphStyle.alignment = .center
+                paragraphStyle.lineBreakMode = .byTruncatingTail
+
+                let textAttributes: [NSAttributedString.Key: Any] = [
+                    .font: labelFont,
+                    .foregroundColor: UIColor.white,
+                    .paragraphStyle: paragraphStyle
+                ]
+                (labelText as NSString).draw(in: textRect, withAttributes: textAttributes)
+            }
+        }
+
+        /// POI 类型对应的 UIColor
+        private func poiColor(for category: POICategory) -> UIColor {
+            switch category {
+            case .store: return .systemGreen
+            case .hospital: return .systemRed
+            case .pharmacy: return .systemPurple
+            case .gasStation: return .systemOrange
+            case .restaurant: return .systemYellow
+            case .cafe: return .brown
+            }
+        }
+    }
+}
+
+// MARK: - POI 标记类
+
+/// POI 标记
+class POIAnnotation: NSObject, MKAnnotation {
+    let poi: SearchedPOI
+    var isScavenged: Bool = false
+
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+
+    var title: String? {
+        poi.name
+    }
+
+    var subtitle: String? {
+        poi.category.displayName
+    }
+
+    init(poi: SearchedPOI) {
+        self.poi = poi
+        self.coordinate = poi.coordinate
+        super.init()
     }
 }
 
@@ -373,6 +588,8 @@ struct MapViewRepresentable: UIViewRepresentable {
         isTracking: false,
         isPathClosed: false,
         territories: [],
-        currentUserId: nil
+        currentUserId: nil,
+        nearbyPOIs: [],
+        scavengedPOIIds: []
     )
 }

@@ -19,6 +19,9 @@ struct EarthLordApp: App {
     /// 定位管理器
     @StateObject private var locationManager = LocationManager.shared
 
+    /// App 生命周期阶段
+    @Environment(\.scenePhase) private var scenePhase
+
     /// 是否显示启动页
     @State private var showSplash = true
 
@@ -62,6 +65,39 @@ struct EarthLordApp: App {
                 ? Locale.current
                 : Locale(identifier: languageManager.currentLanguage.rawValue))
             .environmentObject(locationManager)
+            .onChange(of: scenePhase) { _, newPhase in
+                handleScenePhaseChange(newPhase)
+            }
+        }
+    }
+
+    // MARK: - 生命周期处理
+
+    /// 处理 App 生命周期变化
+    /// - Parameter phase: 新的生命周期阶段
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            // App 进入前台：标记在线，恢复定时上报（如果正在探索）
+            print("📱 [App] 进入前台 (active)")
+            Task {
+                await PlayerLocationManager.shared.markOnline()
+            }
+
+        case .background:
+            // App 进入后台：标记离线，停止定时上报
+            print("📱 [App] 进入后台 (background)")
+            Task {
+                await PlayerLocationManager.shared.markOffline()
+                PlayerLocationManager.shared.stopPeriodicReporting()
+            }
+
+        case .inactive:
+            // App 处于非活跃状态（如接电话、下拉通知栏）
+            print("📱 [App] 非活跃状态 (inactive)")
+
+        @unknown default:
+            print("📱 [App] 未知生命周期状态")
         }
     }
 }

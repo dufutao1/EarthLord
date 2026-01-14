@@ -34,6 +34,17 @@ struct TestMenuView: View {
                     description: "查看圈地追踪的实时日志"
                 )
             }
+
+            // 探索功能测试
+            NavigationLink {
+                ExplorationTestView()
+            } label: {
+                testMenuItem(
+                    icon: "figure.walk",
+                    title: "探索功能测试",
+                    description: "查看探索和POI搜刮的实时日志"
+                )
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("开发测试")

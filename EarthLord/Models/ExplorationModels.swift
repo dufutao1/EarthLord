@@ -1,9 +1,9 @@
 //
-//  MockExplorationData.swift
+//  ExplorationModels.swift
 //  EarthLord
 //
-//  探索模块测试假数据
-//  用于开发和测试阶段，模拟真实的探索场景数据
+//  探索模块数据模型
+//  包含 POI、探索结果等类型定义
 //
 
 import Foundation
@@ -139,7 +139,7 @@ enum ItemCategory: String, Codable {
     }
 }
 
-/// 物品品质（部分物品可能没有品质区分）
+/// 物品品质
 enum ItemQuality: String, Codable {
     case poor = "poor"           // 劣质
     case normal = "normal"       // 普通
@@ -223,6 +223,18 @@ struct BackpackItem: Identifiable, Codable {
 
 // MARK: - 探索结果模型
 
+/// 探索获得的物品
+struct ExplorationLoot: Codable {
+    let itemId: String      // 物品定义ID
+    let quantity: Int       // 获得数量
+    let quality: String?    // 品质
+
+    enum CodingKeys: String, CodingKey {
+        case itemId = "item_id"
+        case quantity, quality
+    }
+}
+
 /// 单次探索统计数据
 struct ExplorationStats: Codable {
     let walkDistance: Double           // 本次行走距离（米）
@@ -280,18 +292,6 @@ struct ExplorationStats: Codable {
     }
 }
 
-/// 探索获得的物品
-struct ExplorationLoot: Codable {
-    let itemId: String      // 物品定义ID
-    let quantity: Int       // 获得数量
-    let quality: ItemQuality?  // 品质
-
-    enum CodingKeys: String, CodingKey {
-        case itemId = "item_id"
-        case quantity, quality
-    }
-}
-
 /// 完整的探索结果
 struct ExplorationResult: Codable {
     let id: String                    // 探索记录ID
@@ -310,17 +310,13 @@ struct ExplorationResult: Codable {
     }
 }
 
-// MARK: - Mock 数据
+// MARK: - Mock 数据（用于预览和测试）
 
-/// 探索模块测试假数据
+/// 探索模块测试数据
 struct MockExplorationData {
 
-    // MARK: - POI 假数据
-
     /// 测试用 POI 列表
-    /// 包含5个不同状态的兴趣点，用于测试地图显示和交互
     static let mockPOIs: [POI] = [
-        // 废弃超市：已发现，有物资
         POI(
             id: "poi_001",
             name: "废弃超市",
@@ -329,9 +325,8 @@ struct MockExplorationData {
             discoveryStatus: .discovered,
             resourceStatus: .hasResources,
             dangerLevel: 2,
-            description: "一家被遗弃的大型超市，货架上还散落着一些物资。注意可能有其他幸存者出没。"
+            description: "一家被遗弃的大型超市，货架上还散落着一些物资。"
         ),
-        // 医院废墟：已发现，已被搜空
         POI(
             id: "poi_002",
             name: "医院废墟",
@@ -340,9 +335,8 @@ struct MockExplorationData {
             discoveryStatus: .discovered,
             resourceStatus: .empty,
             dangerLevel: 4,
-            description: "曾经繁忙的医院如今只剩断壁残垣，医疗物资已被搜刮一空。这里危险等级较高。"
+            description: "曾经繁忙的医院如今只剩断壁残垣。"
         ),
-        // 加油站：未发现
         POI(
             id: "poi_003",
             name: "加油站",
@@ -352,37 +346,39 @@ struct MockExplorationData {
             resourceStatus: .unknown,
             dangerLevel: 3,
             description: "路边的加油站，可能还有燃料和便利店物资。"
-        ),
-        // 药店废墟：已发现，有物资
-        POI(
-            id: "poi_004",
-            name: "药店废墟",
-            type: .pharmacy,
-            coordinate: CLLocationCoordinate2D(latitude: 23.1260, longitude: 113.2620),
-            discoveryStatus: .discovered,
-            resourceStatus: .hasResources,
-            dangerLevel: 2,
-            description: "街角的药店，柜台后面可能还藏有一些药品和医疗用品。"
-        ),
-        // 工厂废墟：未发现
-        POI(
-            id: "poi_005",
-            name: "工厂废墟",
-            type: .factory,
-            coordinate: CLLocationCoordinate2D(latitude: 23.1320, longitude: 113.2590),
-            discoveryStatus: .undiscovered,
-            resourceStatus: .unknown,
-            dangerLevel: 3,
-            description: "废弃的工厂建筑群，可能有大量工业材料和工具。"
         )
     ]
 
-    // MARK: - 物品定义假数据
+    /// 测试用背包物品列表
+    static let mockBackpackItems: [BackpackItem] = [
+        BackpackItem(
+            id: "bp_001",
+            itemId: "item_water_bottle",
+            quantity: 5,
+            quality: nil,
+            obtainedAt: Date().addingTimeInterval(-3600),
+            obtainedFrom: "废弃超市"
+        ),
+        BackpackItem(
+            id: "bp_002",
+            itemId: "item_canned_food",
+            quantity: 3,
+            quality: .good,
+            obtainedAt: Date().addingTimeInterval(-7200),
+            obtainedFrom: "废弃超市"
+        ),
+        BackpackItem(
+            id: "bp_003",
+            itemId: "item_bandage",
+            quantity: 8,
+            quality: .normal,
+            obtainedAt: Date().addingTimeInterval(-1800),
+            obtainedFrom: "药店废墟"
+        )
+    ]
 
-    /// 物品定义表
-    /// 记录每种物品的基础属性，用于物品系统
+    /// 测试用物品定义表
     static let itemDefinitions: [ItemDefinition] = [
-        // 水类
         ItemDefinition(
             id: "item_water_bottle",
             name: "矿泉水",
@@ -391,10 +387,9 @@ struct MockExplorationData {
             volume: 0.5,
             rarity: .common,
             hasQuality: false,
-            description: "一瓶干净的矿泉水，可以补充水分。",
+            description: "一瓶干净的矿泉水。",
             maxStack: 20
         ),
-        // 食物
         ItemDefinition(
             id: "item_canned_food",
             name: "罐头食品",
@@ -403,10 +398,9 @@ struct MockExplorationData {
             volume: 0.3,
             rarity: .common,
             hasQuality: true,
-            description: "密封的罐头食品，保质期较长。",
+            description: "密封的罐头食品。",
             maxStack: 15
         ),
-        // 医疗 - 绷带
         ItemDefinition(
             id: "item_bandage",
             name: "绷带",
@@ -417,204 +411,20 @@ struct MockExplorationData {
             hasQuality: true,
             description: "用于包扎伤口的医用绷带。",
             maxStack: 30
-        ),
-        // 医疗 - 药品
-        ItemDefinition(
-            id: "item_medicine",
-            name: "药品",
-            category: .medical,
-            weight: 0.1,
-            volume: 0.05,
-            rarity: .uncommon,
-            hasQuality: true,
-            description: "各类常用药品，可治疗轻微疾病。",
-            maxStack: 20
-        ),
-        // 材料 - 木材
-        ItemDefinition(
-            id: "item_wood",
-            name: "木材",
-            category: .material,
-            weight: 2.0,
-            volume: 3.0,
-            rarity: .common,
-            hasQuality: true,
-            description: "可用于建造和修缮的木材。",
-            maxStack: 50
-        ),
-        // 材料 - 废金属
-        ItemDefinition(
-            id: "item_scrap_metal",
-            name: "废金属",
-            category: .material,
-            weight: 1.5,
-            volume: 0.5,
-            rarity: .common,
-            hasQuality: false,
-            description: "从废墟中收集的金属碎片，可用于制作和修理。",
-            maxStack: 100
-        ),
-        // 工具 - 手电筒
-        ItemDefinition(
-            id: "item_flashlight",
-            name: "手电筒",
-            category: .tool,
-            weight: 0.3,
-            volume: 0.2,
-            rarity: .uncommon,
-            hasQuality: true,
-            description: "便携式手电筒，探索黑暗区域的必备工具。",
-            maxStack: 1
-        ),
-        // 工具 - 绳子
-        ItemDefinition(
-            id: "item_rope",
-            name: "绳子",
-            category: .tool,
-            weight: 0.8,
-            volume: 0.5,
-            rarity: .common,
-            hasQuality: true,
-            description: "结实的尼龙绳，用途广泛。",
-            maxStack: 10
         )
     ]
-
-    // MARK: - 背包物品假数据
-
-    /// 测试用背包物品列表
-    /// 包含6-8种不同类型的物品实例
-    static let mockBackpackItems: [BackpackItem] = [
-        // 矿泉水 x5
-        BackpackItem(
-            id: "bp_001",
-            itemId: "item_water_bottle",
-            quantity: 5,
-            quality: nil,  // 矿泉水没有品质区分
-            obtainedAt: Date().addingTimeInterval(-3600),
-            obtainedFrom: "废弃超市"
-        ),
-        // 罐头食品 x3（良好品质）
-        BackpackItem(
-            id: "bp_002",
-            itemId: "item_canned_food",
-            quantity: 3,
-            quality: .good,
-            obtainedAt: Date().addingTimeInterval(-7200),
-            obtainedFrom: "废弃超市"
-        ),
-        // 绷带 x8（普通品质）
-        BackpackItem(
-            id: "bp_003",
-            itemId: "item_bandage",
-            quantity: 8,
-            quality: .normal,
-            obtainedAt: Date().addingTimeInterval(-1800),
-            obtainedFrom: "药店废墟"
-        ),
-        // 药品 x2（优秀品质）
-        BackpackItem(
-            id: "bp_004",
-            itemId: "item_medicine",
-            quantity: 2,
-            quality: .excellent,
-            obtainedAt: Date().addingTimeInterval(-1800),
-            obtainedFrom: "药店废墟"
-        ),
-        // 木材 x12（普通品质）
-        BackpackItem(
-            id: "bp_005",
-            itemId: "item_wood",
-            quantity: 12,
-            quality: .normal,
-            obtainedAt: Date().addingTimeInterval(-5400),
-            obtainedFrom: nil
-        ),
-        // 废金属 x25
-        BackpackItem(
-            id: "bp_006",
-            itemId: "item_scrap_metal",
-            quantity: 25,
-            quality: nil,  // 废金属没有品质区分
-            obtainedAt: Date().addingTimeInterval(-9000),
-            obtainedFrom: nil
-        ),
-        // 手电筒 x1（良好品质）
-        BackpackItem(
-            id: "bp_007",
-            itemId: "item_flashlight",
-            quantity: 1,
-            quality: .good,
-            obtainedAt: Date().addingTimeInterval(-86400),
-            obtainedFrom: "废弃超市"
-        ),
-        // 绳子 x3（普通品质）
-        BackpackItem(
-            id: "bp_008",
-            itemId: "item_rope",
-            quantity: 3,
-            quality: .normal,
-            obtainedAt: Date().addingTimeInterval(-43200),
-            obtainedFrom: nil
-        )
-    ]
-
-    // MARK: - 探索结果假数据
-
-    /// 测试用探索结果
-    /// 模拟一次30分钟的探索活动
-    static let mockExplorationResult: ExplorationResult = {
-        let now = Date()
-        let startTime = now.addingTimeInterval(-1800) // 30分钟前
-
-        let stats = ExplorationStats(
-            walkDistance: 2500,              // 本次行走 2500 米
-            totalWalkDistance: 15000,        // 累计行走 15000 米
-            walkDistanceRank: 42,            // 排名第 42
-            exploredArea: 50000,             // 本次探索 5 万平方米
-            totalExploredArea: 250000,       // 累计探索 25 万平方米
-            exploredAreaRank: 38,            // 排名第 38
-            duration: 1800,                  // 探索时长 30 分钟
-            startTime: startTime,
-            endTime: now
-        )
-
-        // 本次探索获得的物品
-        let loot: [ExplorationLoot] = [
-            ExplorationLoot(itemId: "item_wood", quantity: 5, quality: .normal),
-            ExplorationLoot(itemId: "item_water_bottle", quantity: 3, quality: nil),
-            ExplorationLoot(itemId: "item_canned_food", quantity: 2, quality: .good)
-        ]
-
-        return ExplorationResult(
-            id: "exp_001",
-            userId: "user_test_001",
-            stats: stats,
-            loot: loot,
-            discoveredPOIs: ["poi_003"],    // 新发现了加油站
-            visitedPOIs: ["poi_001", "poi_004"]  // 访问了废弃超市和药店废墟
-        )
-    }()
-
-    // MARK: - 辅助方法
 
     /// 根据物品ID获取物品定义
-    /// - Parameter itemId: 物品ID
-    /// - Returns: 物品定义，如果不存在返回nil
     static func getItemDefinition(by itemId: String) -> ItemDefinition? {
         return itemDefinitions.first { $0.id == itemId }
     }
 
     /// 根据物品ID获取物品中文名称
-    /// - Parameter itemId: 物品ID
-    /// - Returns: 物品中文名称，如果不存在返回"未知物品"
     static func getItemName(by itemId: String) -> String {
         return getItemDefinition(by: itemId)?.name ?? "未知物品"
     }
 
     /// 计算背包总重量
-    /// - Parameter items: 背包物品列表
-    /// - Returns: 总重量（千克）
     static func calculateTotalWeight(items: [BackpackItem]) -> Double {
         return items.reduce(0) { total, item in
             let definition = getItemDefinition(by: item.itemId)
@@ -624,8 +434,6 @@ struct MockExplorationData {
     }
 
     /// 计算背包总体积
-    /// - Parameter items: 背包物品列表
-    /// - Returns: 总体积（升）
     static func calculateTotalVolume(items: [BackpackItem]) -> Double {
         return items.reduce(0) { total, item in
             let definition = getItemDefinition(by: item.itemId)
@@ -635,8 +443,6 @@ struct MockExplorationData {
     }
 
     /// 按分类统计背包物品
-    /// - Parameter items: 背包物品列表
-    /// - Returns: 分类字典，key为分类，value为该分类的物品数组
     static func groupItemsByCategory(items: [BackpackItem]) -> [ItemCategory: [BackpackItem]] {
         var grouped: [ItemCategory: [BackpackItem]] = [:]
 
@@ -651,4 +457,36 @@ struct MockExplorationData {
 
         return grouped
     }
+
+    /// 测试用探索结果
+    static let mockExplorationResult: ExplorationResult = {
+        let now = Date()
+        let startTime = now.addingTimeInterval(-1800)
+
+        let stats = ExplorationStats(
+            walkDistance: 2500,
+            totalWalkDistance: 15000,
+            walkDistanceRank: 42,
+            exploredArea: 50000,
+            totalExploredArea: 250000,
+            exploredAreaRank: 38,
+            duration: 1800,
+            startTime: startTime,
+            endTime: now
+        )
+
+        let loot: [ExplorationLoot] = [
+            ExplorationLoot(itemId: "item_wood", quantity: 5, quality: "normal"),
+            ExplorationLoot(itemId: "item_water_bottle", quantity: 3, quality: nil)
+        ]
+
+        return ExplorationResult(
+            id: "exp_001",
+            userId: "user_test_001",
+            stats: stats,
+            loot: loot,
+            discoveredPOIs: ["poi_003"],
+            visitedPOIs: ["poi_001"]
+        )
+    }()
 }
