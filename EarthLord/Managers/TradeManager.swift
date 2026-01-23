@@ -35,109 +35,80 @@ final class TradeManager: ObservableObject {
 
     // MARK: - 公开方法
 
-    /// 创建交易挂单
+    /// 创建交易挂单（使用 RPC 函数）
     /// - Parameters:
     ///   - offeringItems: 我提供的物品
     ///   - requestingItems: 我需要的物品
     ///   - validHours: 有效期（小时），默认 24 小时
     ///   - message: 留言（可选）
-    /// - Returns: 创建的挂单
+    ///   - latitude: 纬度（可选）
+    ///   - longitude: 经度（可选）
+    /// - Returns: 创建结果
     func createTradeOffer(
         offeringItems: [TradeItem],
         requestingItems: [TradeItem],
         validHours: Int = 24,
-        message: String? = nil
-    ) async throws -> TradeOffer {
+        message: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) async throws -> UUID {
         print("📦 [Trade] 开始创建交易挂单...")
 
-        // 1. 获取当前用户
-        guard let userId = supabase.auth.currentUser?.id else {
-            throw TradeError.notAuthenticated
+        // 构建 JSON 字符串
+        let offeringJson = try JSONEncoder().encode(offeringItems)
+        let requestingJson = try JSONEncoder().encode(requestingItems)
+
+        guard let offeringString = String(data: offeringJson, encoding: .utf8),
+              let requestingString = String(data: requestingJson, encoding: .utf8) else {
+            throw TradeError.databaseError("JSON 编码失败")
         }
 
-        // 2. 验证物品是否足够（从数据库查询）
-        for item in offeringItems {
-            // 从数据库查询物品数量
-            let inventoryItems: [InventoryItemDB] = try await supabase
-                .from("inventory")
-                .select()
-                .eq("user_id", value: userId.uuidString)
-                .eq("item_id", value: item.item_id)
-                .execute()
-                .value
-
-            let available = inventoryItems.first?.quantity ?? 0
-
-            if available < item.quantity {
-                throw TradeError.insufficientItems(item.item_id)
-            }
-        }
-
-        // 3. 扣除物品（锁定到挂单中）
-        for item in offeringItems {
-            await InventoryManager.shared.removeItem(itemId: item.item_id, quantity: item.quantity)
-        }
-
-        // 4. 计算过期时间
-        let expiresAt = Date().addingTimeInterval(TimeInterval(validHours * 3600))
-
-        // 5. 获取用户名
-        let username = supabase.auth.currentUser?.email ?? "未知用户"
-
-        // 6. 创建挂单
-        let offerData: [String: AnyJSON] = [
-            "owner_id": .string(userId.uuidString),
-            "owner_username": .string(username),
-            "offering_items": .array(offeringItems.map { item in
-                    .object([
-                        "item_id": .string(item.item_id),
-                        "quantity": .integer(item.quantity)
-                    ])
-            }),
-            "requesting_items": .array(requestingItems.map { item in
-                    .object([
-                        "item_id": .string(item.item_id),
-                        "quantity": .integer(item.quantity)
-                    ])
-            }),
-            "status": .string("active"),
-            "message": message.map { .string($0) } ?? .null,
-            "expires_at": .string(ISO8601DateFormatter().string(from: expiresAt))
+        // 调用 RPC 函数
+        var params: [String: AnyJSON] = [
+            "p_offering_items": .string(offeringString),
+            "p_requesting_items": .string(requestingString),
+            "p_expires_hours": .integer(validHours)
         ]
 
-        let response: TradeOffer = try await supabase
-            .from("trade_offers")
-            .insert(offerData)
-            .select()
-            .single()
+        if let message = message {
+            params["p_message"] = .string(message)
+        }
+
+        if let lat = latitude, let lon = longitude {
+            params["p_latitude"] = .double(lat)
+            params["p_longitude"] = .double(lon)
+        }
+
+        let response: TradeRPCResponse = try await supabase
+            .rpc("create_trade_offer_v2", params: params)
             .execute()
             .value
 
-        print("✅ [Trade] 挂单创建成功: \(response.id)")
+        if response.success {
+            print("✅ [Trade] 挂单创建成功: \(response.offer_id?.uuidString ?? "unknown")")
+            await loadMyOffers()
 
-        // 7. 刷新我的挂单列表
-        await loadMyOffers()
-
-        return response
+            if let offerId = response.offer_id {
+                return offerId
+            } else {
+                throw TradeError.databaseError("未返回挂单ID")
+            }
+        } else {
+            let errorMessage = response.error ?? "未知错误"
+            print("❌ [Trade] 创建挂单失败: \(errorMessage)")
+            throw TradeError.databaseError(errorMessage)
+        }
     }
 
-    /// 接受交易挂单
+    /// 接受交易挂单（使用 RPC 函数）
     /// - Parameter offerId: 挂单 ID
     func acceptTradeOffer(offerId: UUID) async throws {
         print("📦 [Trade] 开始接受交易挂单: \(offerId)")
 
-        guard let userId = supabase.auth.currentUser?.id else {
-            throw TradeError.notAuthenticated
-        }
-
-        let username = supabase.auth.currentUser?.email ?? "未知用户"
-
-        // 调用 PostgreSQL 存储过程（带行级锁和事务）
-        let response: AcceptTradeResponse = try await supabase
+        // 调用 PostgreSQL 存储过程（使用 auth.uid() 自动获取用户ID）
+        let response: TradeRPCResponse = try await supabase
             .rpc("accept_trade_offer", params: [
-                "p_offer_id": offerId.uuidString,
-                "p_buyer_id": userId.uuidString,
-                "p_buyer_username": username
+                "p_offer_id": AnyJSON.string(offerId.uuidString)
             ])
             .execute()
             .value
@@ -156,67 +127,37 @@ final class TradeManager: ObservableObject {
         }
     }
 
-    /// 取消交易挂单
+    /// 取消交易挂单（使用 RPC 函数）
     /// - Parameter offerId: 挂单 ID
     func cancelTradeOffer(offerId: UUID) async throws {
         print("📦 [Trade] 开始取消交易挂单: \(offerId)")
 
-        guard let userId = supabase.auth.currentUser?.id else {
-            throw TradeError.notAuthenticated
-        }
-
-        // 1. 查询挂单
-        let offer: TradeOffer = try await supabase
-            .from("trade_offers")
-            .select()
-            .eq("id", value: offerId.uuidString)
-            .single()
+        // 调用 PostgreSQL 存储过程
+        let response: TradeRPCResponse = try await supabase
+            .rpc("cancel_trade_offer", params: [
+                "p_offer_id": AnyJSON.string(offerId.uuidString)
+            ])
             .execute()
             .value
 
-        // 2. 验证权限
-        guard offer.owner_id == userId else {
-            throw TradeError.invalidPermission
+        if response.success {
+            print("✅ [Trade] 挂单取消成功，物品已退还")
+            await loadMyOffers()
+        } else {
+            let errorMessage = response.error ?? "未知错误"
+            print("❌ [Trade] 取消挂单失败: \(errorMessage)")
+            throw TradeError.databaseError(errorMessage)
         }
-
-        guard offer.status == .active else {
-            throw TradeError.offerUnavailable
-        }
-
-        // 3. 退还物品
-        for item in offer.offering_items {
-            await InventoryManager.shared.addItem(
-                itemId: item.item_id,
-                quantity: item.quantity
-            )
-        }
-
-        // 4. 更新挂单状态
-        try await supabase
-            .from("trade_offers")
-            .update(["status": "cancelled"])
-            .eq("id", value: offerId.uuidString)
-            .execute()
-
-        print("✅ [Trade] 挂单取消成功，物品已退还")
-
-        // 5. 刷新挂单列表
-        await loadMyOffers()
     }
 
-    /// 加载我的挂单
+    /// 加载我的挂单（使用 RPC 函数）
     func loadMyOffers() async {
-        guard let userId = supabase.auth.currentUser?.id else { return }
-
         isLoading = true
         defer { isLoading = false }
 
         do {
             let offers: [TradeOffer] = try await supabase
-                .from("trade_offers")
-                .select()
-                .eq("owner_id", value: userId.uuidString)
-                .order("created_at", ascending: false)
+                .rpc("get_my_trade_offers")
                 .execute()
                 .value
 
@@ -228,20 +169,22 @@ final class TradeManager: ObservableObject {
     }
 
     /// 加载可接受的挂单（其他人的）
-    func loadAvailableOffers() async {
-        guard let userId = supabase.auth.currentUser?.id else { return }
-
+    func loadAvailableOffers(latitude: Double? = nil, longitude: Double? = nil, radiusKm: Double = 10) async {
         isLoading = true
         defer { isLoading = false }
 
         do {
+            var params: [String: AnyJSON] = [
+                "p_radius_km": .double(radiusKm)
+            ]
+
+            if let lat = latitude, let lon = longitude {
+                params["p_latitude"] = .double(lat)
+                params["p_longitude"] = .double(lon)
+            }
+
             let offers: [TradeOffer] = try await supabase
-                .from("trade_offers")
-                .select()
-                .eq("status", value: "active")
-                .neq("owner_id", value: userId.uuidString)
-                .gt("expires_at", value: ISO8601DateFormatter().string(from: Date()))
-                .order("created_at", ascending: false)
+                .rpc("get_nearby_trade_offers", params: params)
                 .execute()
                 .value
 
@@ -252,20 +195,14 @@ final class TradeManager: ObservableObject {
         }
     }
 
-    /// 加载交易历史
+    /// 加载交易历史（使用 RPC 函数）
     func loadTradeHistory() async {
-        guard let userId = supabase.auth.currentUser?.id else { return }
-
         isLoading = true
         defer { isLoading = false }
 
         do {
-            // 查询我作为卖家或买家的交易
             let history: [TradeHistory] = try await supabase
-                .from("trade_history")
-                .select()
-                .or("seller_id.eq.\(userId.uuidString),buyer_id.eq.\(userId.uuidString)")
-                .order("completed_at", ascending: false)
+                .rpc("get_my_trade_history")
                 .execute()
                 .value
 
@@ -276,80 +213,53 @@ final class TradeManager: ObservableObject {
         }
     }
 
-    /// 评价交易
+    /// 评价交易（使用 RPC 函数）
     /// - Parameters:
     ///   - historyId: 交易历史 ID
     ///   - rating: 评分 (1-5)
     ///   - comment: 评语（可选）
     func rateTrade(historyId: UUID, rating: Int, comment: String?) async throws {
-        guard let userId = supabase.auth.currentUser?.id else {
-            throw TradeError.notAuthenticated
-        }
-
         guard rating >= 1 && rating <= 5 else {
             throw TradeError.databaseError("评分必须在 1-5 之间")
         }
 
-        // 1. 查询交易历史
-        let history: TradeHistory = try await supabase
-            .from("trade_history")
-            .select()
-            .eq("id", value: historyId.uuidString)
-            .single()
+        var params: [String: AnyJSON] = [
+            "p_history_id": .string(historyId.uuidString),
+            "p_rating": .integer(rating)
+        ]
+
+        if let comment = comment {
+            params["p_comment"] = .string(comment)
+        }
+
+        let response: TradeRPCResponse = try await supabase
+            .rpc("rate_trade", params: params)
             .execute()
             .value
 
-        // 2. 判断角色
-        var updateData: [String: AnyJSON] = [:]
-
-        if history.seller_id == userId {
-            // 卖家评价买家
-            guard history.seller_rating == nil else {
-                throw TradeError.alreadyRated
-            }
-            updateData["seller_rating"] = .integer(rating)
-            if let comment = comment {
-                updateData["seller_comment"] = .string(comment)
-            }
-        } else if history.buyer_id == userId {
-            // 买家评价卖家
-            guard history.buyer_rating == nil else {
-                throw TradeError.alreadyRated
-            }
-            updateData["buyer_rating"] = .integer(rating)
-            if let comment = comment {
-                updateData["buyer_comment"] = .string(comment)
-            }
+        if response.success {
+            print("✅ [Trade] 评价提交成功")
+            await loadTradeHistory()
         } else {
-            throw TradeError.invalidPermission
+            let errorMessage = response.error ?? "未知错误"
+            print("❌ [Trade] 评价失败: \(errorMessage)")
+            throw TradeError.databaseError(errorMessage)
         }
-
-        // 3. 更新评价
-        try await supabase
-            .from("trade_history")
-            .update(updateData)
-            .eq("id", value: historyId.uuidString)
-            .execute()
-
-        print("✅ [Trade] 评价提交成功")
-
-        // 4. 刷新交易历史
-        await loadTradeHistory()
     }
 
     /// 清理过期挂单
     func cleanupExpiredOffers() async {
         do {
             // 调用数据库函数清理（返回清理的数量）
-            let result = try await supabase
+            let count: Int = try await supabase
                 .rpc("cleanup_expired_trade_offers")
                 .execute()
+                .value
 
-            print("✅ [Trade] 过期挂单清理完成")
+            print("✅ [Trade] 过期挂单清理完成，清理了 \(count) 个挂单")
             await loadMyOffers()
         } catch {
             print("❌ [Trade] 清理过期挂单失败: \(error)")
         }
     }
 }
-

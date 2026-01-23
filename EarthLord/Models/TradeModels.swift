@@ -224,11 +224,17 @@ enum TradeRole {
 
 // MARK: - RPC 响应
 
-/// 接受交易的 RPC 响应
-struct AcceptTradeResponse: Codable {
+/// 交易 RPC 通用响应
+struct TradeRPCResponse: Codable {
     let success: Bool
     let message: String?
     let error: String?
+    let offer_id: UUID?
+    let received_items: [TradeItem]?
+    let paid_items: [TradeItem]?
+    let returned_items: [TradeItem]?
+    let seller_username: String?
+    let expires_at: Date?
 }
 
 // MARK: - 交易错误
