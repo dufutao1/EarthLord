@@ -163,12 +163,8 @@ struct ResourcesTabView: View {
             )
 
         case .trade:
-            // 交易 - 占位
-            placeholderView(
-                icon: "arrow.left.arrow.right",
-                title: "交易市场",
-                subtitle: "功能开发中..."
-            )
+            // 交易系统
+            TradeContentView()
         }
     }
 

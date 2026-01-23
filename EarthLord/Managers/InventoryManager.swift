@@ -204,6 +204,16 @@ class InventoryManager: ObservableObject {
         }
     }
 
+    /// 获取指定物品的库存数量
+    func getQuantity(of itemId: String) -> Int {
+        return items.first(where: { $0.item_id == itemId })?.quantity ?? 0
+    }
+
+    /// 获取所有物品定义数组（用于 UI 展示）
+    var allItemDefinitions: [ItemDefinitionDB] {
+        return Array(itemDefinitions.values)
+    }
+
     // MARK: - 私有方法
 
     /// 插入新物品
