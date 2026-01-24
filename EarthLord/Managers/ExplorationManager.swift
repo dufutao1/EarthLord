@@ -641,7 +641,7 @@ class ExplorationManager: NSObject, ObservableObject {
     /// 搜索附近 POI 并设置地理围栏
     @MainActor
     private func searchAndSetupPOIs() async {
-        guard let location = currentLocation?.coordinate ?? startLocation?.coordinate else {
+        guard let wgs84Location = currentLocation?.coordinate ?? startLocation?.coordinate else {
             log("⚠️ 无法搜索 POI：没有位置信息，2秒后重试...")
             // 等待位置更新后再尝试
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -654,15 +654,21 @@ class ExplorationManager: NSObject, ObservableObject {
 
         isLoadingPOIs = true
         log("🔍 ========== 开始搜索附近 POI ==========")
+        log("🔍 用户位置(WGS-84): (\(String(format: "%.6f", wgs84Location.latitude)), \(String(format: "%.6f", wgs84Location.longitude)))")
+
+        // ⚠️ 关键：将 WGS-84 GPS 坐标转换为 GCJ-02，用于 MapKit 搜索
+        // 中国地区 MapKit 使用 GCJ-02 坐标系统
+        let location = CoordinateConverter.wgs84ToGcj02(wgs84Location)
         log("🔍 搜索中心点(GCJ-02): (\(String(format: "%.6f", location.latitude)), \(String(format: "%.6f", location.longitude)))")
 
         // 1. 上报当前位置（确保自己被计入在线玩家）
+        // 注意：上报使用原始 WGS-84 坐标
         log("📡 上报当前位置...")
-        await PlayerLocationManager.shared.reportLocation(location)
+        await PlayerLocationManager.shared.reportLocation(wgs84Location)
 
-        // 2. 查询附近玩家数量
+        // 2. 查询附近玩家数量（使用 WGS-84 坐标查询数据库）
         log("👥 查询附近玩家...")
-        let playerCount = await PlayerLocationManager.shared.countNearbyPlayers(around: location)
+        let playerCount = await PlayerLocationManager.shared.countNearbyPlayers(around: wgs84Location)
         let density = PlayerLocationManager.DensityLevel.from(playerCount: playerCount)
         log("👥 附近玩家: \(playerCount) 人 (\(density.rawValue))")
 
@@ -674,12 +680,12 @@ class ExplorationManager: NSObject, ObservableObject {
         var pois = await POISearchManager.shared.searchNearbyPOIs(around: location, maxResults: maxPOIs)
 
         // 🧪 调试：注入测试 POI（在用户当前 GPS 位置）
-        if enableTestPOI, let gpsLocation = currentLocation?.coordinate {
+        if enableTestPOI {
             // 使用用户的实时 GPS 坐标（WGS-84）
-            let testPOI = createTestPOI(at: gpsLocation)
+            let testPOI = createTestPOI(at: wgs84Location)
             pois.insert(testPOI, at: 0)  // 放在最前面
             log("🧪 [调试] 已注入测试 POI：\(testPOI.name)")
-            log("🧪 [调试] 使用用户当前 GPS 坐标: (\(String(format: "%.6f", gpsLocation.latitude)), \(String(format: "%.6f", gpsLocation.longitude)))")
+            log("🧪 [调试] 使用用户当前 GPS 坐标(WGS-84): (\(String(format: "%.6f", wgs84Location.latitude)), \(String(format: "%.6f", wgs84Location.longitude)))")
         }
 
         // 更新列表
