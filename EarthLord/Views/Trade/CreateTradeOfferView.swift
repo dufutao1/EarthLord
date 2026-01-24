@@ -10,6 +10,9 @@ import SwiftUI
 
 struct CreateTradeOfferView: View {
 
+    /// 发布成功回调
+    var onSuccess: (() -> Void)?
+
     @Environment(\.dismiss) private var dismiss
 
     @StateObject private var tradeManager = TradeManager.shared
@@ -94,6 +97,7 @@ struct CreateTradeOfferView: View {
             }
             .alert("发布成功", isPresented: $showSuccess) {
                 Button("确定") {
+                    onSuccess?()
                     dismiss()
                 }
             } message: {

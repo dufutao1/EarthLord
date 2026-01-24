@@ -45,6 +45,8 @@ struct TerritoryTabView: View {
             }
             .navigationTitle("我的领地")
             .navigationBarTitleDisplayMode(.large)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(ApocalypseTheme.background, for: .navigationBar)
             .refreshable {
                 await loadMyTerritories()
             }
@@ -59,6 +61,12 @@ struct TerritoryTabView: View {
                     Task {
                         await loadMyTerritories()
                     }
+                }
+            }
+            // 监听领地更新通知（重命名等操作后刷新列表）
+            .onReceive(NotificationCenter.default.publisher(for: .territoryUpdated)) { _ in
+                Task {
+                    await loadMyTerritories()
                 }
             }
         }

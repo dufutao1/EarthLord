@@ -99,6 +99,22 @@ enum POICategory: String, CaseIterable {
         case .cafe: return ["咖啡", "奶茶", "茶饮"]
         }
     }
+
+    /// 危险等级（1-5，影响物品稀有度）
+    /// 1-2: 低危（便利店、咖啡店）
+    /// 3: 中危（超市、餐厅）
+    /// 4: 高危（医院、药店）
+    /// 5: 极危（暂无）
+    var dangerLevel: Int {
+        switch self {
+        case .cafe: return 1
+        case .restaurant: return 2
+        case .store: return 3
+        case .gasStation: return 3
+        case .pharmacy: return 4
+        case .hospital: return 4
+        }
+    }
 }
 
 // MARK: - POI 搜索管理器

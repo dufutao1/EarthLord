@@ -232,6 +232,31 @@ final class TerritoryManager {
         }
     }
 
+    // MARK: - 重命名方法
+
+    /// 更新领地名称
+    /// - Parameters:
+    ///   - territoryId: 领地 ID
+    ///   - newName: 新名称
+    /// - Returns: 是否更新成功
+    func updateTerritoryName(territoryId: String, newName: String) async -> Bool {
+        print("✏️ [领地] 开始重命名领地: \(territoryId) -> \(newName)")
+
+        do {
+            try await supabase
+                .from("territories")
+                .update(["name": newName])
+                .eq("id", value: territoryId)
+                .execute()
+
+            print("✏️ [领地] ✅ 领地重命名成功")
+            return true
+        } catch {
+            print("✏️ [领地] ❌ 领地重命名失败: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     // MARK: - 碰撞检测算法
 
     /// 射线法判断点是否在多边形内
@@ -447,6 +472,13 @@ final class TerritoryManager {
             warningLevel: warningLevel
         )
     }
+}
+
+// MARK: - 通知定义
+
+extension Notification.Name {
+    /// 领地数据更新通知（用于刷新列表）
+    static let territoryUpdated = Notification.Name("territoryUpdated")
 }
 
 // MARK: - 错误类型

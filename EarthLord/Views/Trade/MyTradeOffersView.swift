@@ -21,6 +21,9 @@ struct MyTradeOffersView: View {
     /// 操作中状态
     @State private var isProcessing = false
 
+    /// 错误提示
+    @State private var errorMessage: String?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -51,6 +54,16 @@ struct MyTradeOffersView: View {
             }
         } message: {
             Text("确定要取消这个挂单吗？物品将退还到你的背包。")
+        }
+        .alert("取消失败", isPresented: .init(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("确定") {
+                errorMessage = nil
+            }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 
@@ -141,6 +154,7 @@ struct MyTradeOffersView: View {
                 try await tradeManager.cancelTradeOffer(offerId: offer.id)
             } catch {
                 print("❌ 取消挂单失败: \(error)")
+                errorMessage = error.localizedDescription
             }
 
             isProcessing = false

@@ -187,6 +187,22 @@ struct ExplorationResultView: View {
 
     // MARK: - 成就标题
 
+    /// 根据收获情况返回副标题文案
+    private var subtitleText: String {
+        guard let result = result else { return "" }
+        if result.loot.isEmpty {
+            if result.stats.walkDistance < 200 {
+                return "走得还不够远，继续加油"
+            } else {
+                return "虽然没找到物资，但锻炼了身体"
+            }
+        } else if result.loot.count >= 3 {
+            return "这次探索收获满满"
+        } else {
+            return "有所收获，继续努力"
+        }
+    }
+
     /// 顶部成就展示：大图标 + "探索完成！"
     private var titleSection: some View {
         VStack(spacing: 16) {
@@ -224,8 +240,8 @@ struct ExplorationResultView: View {
                 .font(.system(size: 28, weight: .bold))
                 .foregroundColor(ApocalypseTheme.textPrimary)
 
-            // 副标题
-            Text("这次探索收获满满")
+            // 副标题（根据收获动态调整）
+            Text(subtitleText)
                 .font(.system(size: 14))
                 .foregroundColor(ApocalypseTheme.textSecondary)
         }
@@ -323,30 +339,46 @@ struct ExplorationResultView: View {
                     .foregroundColor(ApocalypseTheme.textMuted)
             }
 
-            // 物品列表（依次出现）
-            ForEach(result.loot.indices, id: \.self) { index in
-                if index < lootItemsVisible.count && lootItemsVisible[index] {
-                    AnimatedLootItemRow(loot: result.loot[index], isVisible: lootItemsVisible[index])
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.8).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+            if result.loot.isEmpty {
+                // 没有物品时显示提示
+                VStack(spacing: 8) {
+                    Image(systemName: "tray")
+                        .font(.system(size: 28))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+                    Text("本次探索未获得物品")
+                        .font(.system(size: 13))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+                    Text("走得更远、搜刮更多 POI 可获得物资")
+                        .font(.system(size: 11))
+                        .foregroundColor(ApocalypseTheme.textMuted.opacity(0.7))
                 }
-            }
+                .padding(.vertical, 20)
+            } else {
+                // 物品列表（依次出现）
+                ForEach(result.loot.indices, id: \.self) { index in
+                    if index < lootItemsVisible.count && lootItemsVisible[index] {
+                        AnimatedLootItemRow(loot: result.loot[index], isVisible: lootItemsVisible[index])
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.8).combined(with: .opacity),
+                                removal: .opacity
+                            ))
+                    }
+                }
 
-            // 底部提示
-            HStack {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(ApocalypseTheme.success)
+                // 底部提示（只有有物品时才显示）
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(ApocalypseTheme.success)
 
-                Text("已添加到背包")
-                    .font(.system(size: 12))
-                    .foregroundColor(ApocalypseTheme.success)
+                    Text("已添加到背包")
+                        .font(.system(size: 12))
+                        .foregroundColor(ApocalypseTheme.success)
+                }
+                .padding(.top, 4)
+                .opacity(lootItemsVisible.allSatisfy({ $0 }) ? 1 : 0)
+                .animation(.easeIn(duration: 0.3), value: lootItemsVisible)
             }
-            .padding(.top, 4)
-            .opacity(lootItemsVisible.allSatisfy({ $0 }) ? 1 : 0)
-            .animation(.easeIn(duration: 0.3), value: lootItemsVisible)
         }
         .padding(16)
         .background(ApocalypseTheme.cardBackground)
@@ -355,14 +387,26 @@ struct ExplorationResultView: View {
 
     // MARK: - 确认按钮
 
+    /// 根据收获情况返回按钮文案和图标
+    private var buttonContent: (icon: String, text: String) {
+        guard let result = result else { return ("checkmark", "确定") }
+        if result.loot.isEmpty {
+            return ("figure.walk", "继续探索")
+        } else if result.loot.count >= 3 {
+            return ("hand.thumbsup.fill", "太棒了！")
+        } else {
+            return ("checkmark.circle.fill", "不错！")
+        }
+    }
+
     /// 底部确认按钮
     private var confirmButton: some View {
         Button(action: { dismiss() }) {
             HStack(spacing: 8) {
-                Image(systemName: "hand.thumbsup.fill")
+                Image(systemName: buttonContent.icon)
                     .font(.system(size: 16))
 
-                Text("太棒了！")
+                Text(buttonContent.text)
                     .font(.system(size: 17, weight: .semibold))
             }
             .foregroundColor(.white)

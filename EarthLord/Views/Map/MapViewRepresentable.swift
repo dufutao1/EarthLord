@@ -194,9 +194,18 @@ struct MapViewRepresentable: UIViewRepresentable {
 
     /// 绘制领地多边形
     private func drawTerritories(on mapView: MKMapView, context: Context) {
-        // 检查领地数量是否有变化
-        guard context.coordinator.lastTerritoriesCount != territories.count else { return }
-        context.coordinator.lastTerritoriesCount = territories.count
+        // 计算领地数据的哈希值（包含数量和坐标）
+        let territoriesHash = territories.map { territory in
+            let coords = territory.toCoordinates()
+            return "\(territory.id)-\(coords.count)-\(coords.first?.latitude ?? 0)-\(coords.first?.longitude ?? 0)"
+        }.joined(separator: "|")
+
+        // ⚠️ 临时：强制每次都重新绘制，方便调试
+        // 只有当哈希值变化时才重新绘制（更准确的检测）
+        // guard context.coordinator.lastTerritoriesHash != territoriesHash else { return }
+        context.coordinator.lastTerritoriesHash = territoriesHash
+
+        print("🗺️ [地图] 🔄 强制重新绘制领地")
 
         // 移除旧的领地多边形（保留轨迹和当前绘制的多边形）
         let territoryOverlays = mapView.overlays.filter { overlay in
@@ -207,25 +216,45 @@ struct MapViewRepresentable: UIViewRepresentable {
         }
         mapView.removeOverlays(territoryOverlays)
 
+        // 🔧 强制刷新地图渲染器
+        mapView.setNeedsDisplay()
+        print("🗺️ [地图] 已移除 \(territoryOverlays.count) 个旧的领地 overlay")
+
         // 绘制每个领地
         for territory in territories {
             var coords = territory.toCoordinates()
 
-            // 中国大陆需要坐标转换（WGS-84 → GCJ-02）
+            print("🗺️ [地图] 领地 '\(territory.displayName)' 原始坐标（前3个点）:")
+            for (index, coord) in coords.prefix(3).enumerated() {
+                print("  点\(index+1): (\(coord.latitude), \(coord.longitude))")
+            }
+
+            // 🔄 尝试：数据库可能保存的是 WGS-84，需要转换为 GCJ-02 显示
             coords = coords.map { coord in
                 CoordinateConverter.wgs84ToGcj02(coord)
             }
 
+            print("🗺️ [地图] 领地 '\(territory.displayName)' 转换后坐标（前3个点）:")
+            for (index, coord) in coords.prefix(3).enumerated() {
+                print("  点\(index+1): (\(coord.latitude), \(coord.longitude))")
+            }
+
             guard coords.count >= 3 else { continue }
 
-            let polygon = MKPolygon(coordinates: coords, count: coords.count)
+            // 🔧 关键修复：使用 var 数组确保是可变副本，然后通过 withUnsafeMutableBufferPointer 正确传递
+            var mutableCoords = coords
+            let polygon = mutableCoords.withUnsafeMutableBufferPointer { buffer -> MKPolygon in
+                MKPolygon(coordinates: buffer.baseAddress!, count: buffer.count)
+            }
 
             // ⚠️ 关键：比较 userId 时必须统一大小写！
             // 数据库存的是小写 UUID，但 iOS 的 uuidString 返回大写
             let isMine = territory.userId.lowercased() == currentUserId?.lowercased()
             polygon.title = isMine ? "mine" : "others"
 
+            print("🗺️ [地图] 即将添加 overlay: \(polygon.title ?? "nil"), 坐标数: \(polygon.pointCount)")
             mapView.addOverlay(polygon, level: .aboveRoads)
+            print("🗺️ [地图] ✅ overlay 已添加")
         }
 
         if !territories.isEmpty {
@@ -269,8 +298,8 @@ struct MapViewRepresentable: UIViewRepresentable {
         /// 上次更新的轨迹版本号（用于避免重复更新）
         var lastPathVersion: Int = -1
 
-        /// 上次更新的领地数量（用于避免重复绘制）
-        var lastTerritoriesCount: Int = -1
+        /// 上次更新的领地数据哈希（用于避免重复绘制，检测坐标变化）
+        var lastTerritoriesHash: String = ""
 
         /// 上次更新的 POI 数量
         var lastPOICount: Int = -1

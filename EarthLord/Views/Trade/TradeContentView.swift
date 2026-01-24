@@ -67,7 +67,10 @@ struct TradeContentView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .sheet(isPresented: $showCreateOffer) {
-            CreateTradeOfferView()
+            CreateTradeOfferView(onSuccess: {
+                // 发布成功后切换到"我的挂单"Tab
+                selectedTab = .myOffers
+            })
         }
         .onAppear {
             Task {

@@ -105,11 +105,14 @@ struct MapTabView: View {
                 .transition(.opacity)
             }
 
-            // 搜刮结果视图
-            if explorationManager.showScavengeResult, let items = explorationManager.scavengeResult {
+            // 搜刮结果视图（全屏）
+            if explorationManager.showScavengeResult {
                 ScavengeResultView(
                     poiName: explorationManager.scavengedPOIName,
-                    items: items,
+                    dangerLevel: explorationManager.scavengedPOIDangerLevel,
+                    aiItems: explorationManager.aiScavengeResult,
+                    items: explorationManager.scavengeResult,
+                    isRealAI: explorationManager.isRealAIGenerated,
                     onConfirm: {
                         explorationManager.dismissScavengeResult()
                     }
@@ -906,7 +909,11 @@ struct MapTabView: View {
             let result = await explorationManager.stopExploration()
             await MainActor.run {
                 explorationResult = result
-                showExplorationResult = true
+                // 只有当有结果时才显示结果页面
+                // 如果 result 为 nil（超速失败或取消），不显示结果页面
+                if result != nil {
+                    showExplorationResult = true
+                }
             }
         }
     }

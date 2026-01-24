@@ -10,6 +10,7 @@ import Foundation
 import CoreLocation
 import Combine
 import Supabase
+import MapKit
 
 // MARK: - 数据库模型
 
@@ -102,14 +103,23 @@ class ExplorationManager: NSObject, ObservableObject {
     /// 待处理的 POI 队列（用于处理同时在多个围栏内的情况）
     private var pendingPOIQueue: [SearchedPOI] = []
 
-    /// 搜刮结果（用于显示结果视图）
+    /// 搜刮结果（传统物品，用于兼容）
     @Published var scavengeResult: [RewardItem]?
+
+    /// AI 生成的搜刮结果
+    @Published var aiScavengeResult: [AIGeneratedItem]?
 
     /// 是否显示搜刮结果
     @Published var showScavengeResult: Bool = false
 
     /// 搜刮的 POI 名称（用于结果显示）
     @Published var scavengedPOIName: String = ""
+
+    /// 搜刮的 POI 危险等级
+    @Published var scavengedPOIDangerLevel: Int = 1
+
+    /// 是否真正由 AI 生成（false 表示使用了 fallback 预设物品）
+    @Published var isRealAIGenerated: Bool = true
 
     // MARK: - 内部状态
 
@@ -162,6 +172,12 @@ class ExplorationManager: NSObject, ObservableObject {
 
     /// POI 地理围栏标识符前缀
     private let poiRegionPrefix = "poi_"
+
+    // MARK: - 调试选项（测试完成后设为 false）
+
+    /// 是否启用测试 POI（在用户当前位置创建假 POI）
+    /// 测试完成后改为 false 即可
+    private let enableTestPOI = true
 
     // MARK: - 初始化
 
@@ -655,7 +671,16 @@ class ExplorationManager: NSObject, ObservableObject {
         log("📍 根据密度建议 POI 数量: \(maxPOIs)")
 
         // 4. 搜索 POI（返回的坐标是 GCJ-02）
-        let pois = await POISearchManager.shared.searchNearbyPOIs(around: location, maxResults: maxPOIs)
+        var pois = await POISearchManager.shared.searchNearbyPOIs(around: location, maxResults: maxPOIs)
+
+        // 🧪 调试：注入测试 POI（在用户当前 GPS 位置）
+        if enableTestPOI, let gpsLocation = currentLocation?.coordinate {
+            // 使用用户的实时 GPS 坐标（WGS-84）
+            let testPOI = createTestPOI(at: gpsLocation)
+            pois.insert(testPOI, at: 0)  // 放在最前面
+            log("🧪 [调试] 已注入测试 POI：\(testPOI.name)")
+            log("🧪 [调试] 使用用户当前 GPS 坐标: (\(String(format: "%.6f", gpsLocation.latitude)), \(String(format: "%.6f", gpsLocation.longitude)))")
+        }
 
         // 更新列表
         nearbyPOIs = pois
@@ -680,13 +705,23 @@ class ExplorationManager: NSObject, ObservableObject {
     /// 开始监控单个 POI 的地理围栏
     /// - Returns: 是否成功设置
     private func startPOIMonitoring(for poi: SearchedPOI) -> Bool {
-        // ⚠️ 关键修复：POI 坐标是 GCJ-02，系统用 WGS-84 判断用户位置
-        // 必须把 POI 坐标从 GCJ-02 转换为 WGS-84，围栏才会在正确位置触发
-        let wgs84Coordinate = CoordinateConverter.gcj02ToWgs84(poi.coordinate)
+        // 🧪 测试 POI 直接使用原始坐标（已经是 WGS-84）
+        let isTestPOI = poi.id == "test_poi_debug"
+        let wgs84Coordinate: CLLocationCoordinate2D
 
-        log("🎯 设置围栏: \(poi.name)")
-        log("   GCJ-02: (\(String(format: "%.6f", poi.coordinate.latitude)), \(String(format: "%.6f", poi.coordinate.longitude)))")
-        log("   WGS-84: (\(String(format: "%.6f", wgs84Coordinate.latitude)), \(String(format: "%.6f", wgs84Coordinate.longitude)))")
+        if isTestPOI {
+            // 测试 POI：坐标已经是 WGS-84，不需要转换
+            wgs84Coordinate = poi.coordinate
+            log("🧪 [调试] 设置测试围栏: \(poi.name)")
+            log("🧪 [调试] WGS-84: (\(String(format: "%.6f", wgs84Coordinate.latitude)), \(String(format: "%.6f", wgs84Coordinate.longitude)))")
+        } else {
+            // ⚠️ 关键修复：POI 坐标是 GCJ-02，系统用 WGS-84 判断用户位置
+            // 必须把 POI 坐标从 GCJ-02 转换为 WGS-84，围栏才会在正确位置触发
+            wgs84Coordinate = CoordinateConverter.gcj02ToWgs84(poi.coordinate)
+            log("🎯 设置围栏: \(poi.name)")
+            log("   GCJ-02: (\(String(format: "%.6f", poi.coordinate.latitude)), \(String(format: "%.6f", poi.coordinate.longitude)))")
+            log("   WGS-84: (\(String(format: "%.6f", wgs84Coordinate.latitude)), \(String(format: "%.6f", wgs84Coordinate.longitude)))")
+        }
 
         let region = CLCircularRegion(
             center: wgs84Coordinate,  // 使用转换后的 WGS-84 坐标
@@ -698,6 +733,25 @@ class ExplorationManager: NSObject, ObservableObject {
 
         locationManager?.startMonitoring(for: region)
         return true
+    }
+
+    /// 创建测试 POI（用于调试）
+    /// - Parameter coordinate: 用户当前的 GPS 坐标（WGS-84）
+    private func createTestPOI(at coordinate: CLLocationCoordinate2D) -> SearchedPOI {
+        // 创建假的 MKMapItem
+        let placemark = MKPlacemark(coordinate: coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = "🧪 测试医院（调试用）"
+
+        return SearchedPOI(
+            id: "test_poi_debug",
+            name: "🧪 测试医院（调试用）",
+            coordinate: coordinate,  // 直接使用用户当前 GPS 坐标（WGS-84）
+            category: .hospital,  // 危险等级 4，会生成稀有物品
+            mapItem: mapItem,
+            isScavenged: false,
+            distance: 0
+        )
     }
 
     /// 停止所有 POI 地理围栏监控
@@ -794,52 +848,34 @@ class ExplorationManager: NSObject, ObservableObject {
             return
         }
 
-        log("🔎 开始搜刮: \(poi.name)")
+        log("🔎 开始搜刮: \(poi.name) (危险等级: \(poi.category.dangerLevel))")
 
         // 关闭弹窗
         showPOIPopup = false
 
-        // 生成随机物品（1-3件）
-        let itemCount = Int.random(in: 1...3)
-        var rewards: [RewardItem] = []
+        // 生成物品数量（根据危险等级 1-4 件）
+        let itemCount = min(poi.category.dangerLevel, 4)
 
-        // 从物品定义中随机选择
-        let definitions = Array(InventoryManager.shared.itemDefinitions.values)
-        guard !definitions.isEmpty else {
-            log("⚠️ 物品定义为空，无法生成奖励")
+        // 尝试使用 AI 生成物品
+        log("🤖 正在调用 AI 生成物品...")
+        var aiItems = await AIItemGenerator.shared.generateItems(for: poi, count: itemCount)
+        var usedRealAI = true
+
+        // 如果 AI 生成失败，使用降级方案
+        if aiItems == nil {
+            log("⚠️ AI 生成失败，使用降级方案", type: .warning)
+            aiItems = AIItemGenerator.shared.generateFallbackItems(for: poi, count: itemCount)
+            usedRealAI = false
+        }
+
+        guard let generatedItems = aiItems else {
+            log("❌ 无法生成物品", type: .error)
             return
         }
 
-        for _ in 0..<itemCount {
-            let randomItem = definitions.randomElement()!
-            let quantity = Int.random(in: 1...3)
-            // 根据物品稀有度设置
-            let rarity: ItemRarityLevel
-            switch randomItem.rarity {
-            case "epic": rarity = .epic
-            case "rare": rarity = .rare
-            default: rarity = .common
-            }
-            rewards.append(RewardItem(itemId: randomItem.id, quantity: quantity, rarity: rarity))
-        }
-
-        // 合并相同物品（保留稀有度信息）
-        var mergedRewards: [String: (quantity: Int, rarity: ItemRarityLevel)] = [:]
-        for reward in rewards {
-            if let existing = mergedRewards[reward.itemId] {
-                mergedRewards[reward.itemId] = (existing.quantity + reward.quantity, existing.rarity)
-            } else {
-                mergedRewards[reward.itemId] = (reward.quantity, reward.rarity)
-            }
-        }
-        let finalRewards = mergedRewards.map { RewardItem(itemId: $0.key, quantity: $0.value.quantity, rarity: $0.value.rarity) }
-
-        log("🎁 生成 \(finalRewards.count) 种物品")
-
-        // 存入背包
-        for reward in finalRewards {
-            await InventoryManager.shared.addItem(itemId: reward.itemId, quantity: reward.quantity)
-            log("🎒 存入: \(reward.itemId) x\(reward.quantity)")
+        log("🎁 生成 \(generatedItems.count) 个物品 (\(usedRealAI ? "AI生成" : "预设物品")):")
+        for item in generatedItems {
+            log("  - [\(item.rarityDisplayName)] \(item.name)")
         }
 
         // 标记为已搜刮
@@ -850,9 +886,12 @@ class ExplorationManager: NSObject, ObservableObject {
             nearbyPOIs[index].isScavenged = true
         }
 
-        // 保存搜刮结果用于显示
-        scavengeResult = finalRewards
+        // 保存 AI 搜刮结果用于显示
+        aiScavengeResult = generatedItems
+        scavengeResult = nil  // 清除传统结果
         scavengedPOIName = poi.name
+        scavengedPOIDangerLevel = poi.category.dangerLevel
+        isRealAIGenerated = usedRealAI
 
         // 清除当前 POI
         currentProximityPOI = nil
@@ -879,6 +918,7 @@ class ExplorationManager: NSObject, ObservableObject {
     func dismissScavengeResult() {
         showScavengeResult = false
         scavengeResult = nil
+        aiScavengeResult = nil
 
         // 搜刮结果关闭后，显示队列中的下一个 POI
         showNextPOIPopup()

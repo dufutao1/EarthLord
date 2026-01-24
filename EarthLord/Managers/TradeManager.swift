@@ -33,6 +33,9 @@ final class TradeManager: ObservableObject {
     /// 是否正在加载
     @Published var isLoading = false
 
+    /// 错误信息
+    @Published var errorMessage: String?
+
     // MARK: - 公开方法
 
     /// 创建交易挂单（使用 RPC 函数）
@@ -171,6 +174,7 @@ final class TradeManager: ObservableObject {
     /// 加载可接受的挂单（其他人的）
     func loadAvailableOffers(latitude: Double? = nil, longitude: Double? = nil, radiusKm: Double = 10) async {
         isLoading = true
+        errorMessage = nil
         defer { isLoading = false }
 
         do {
@@ -192,6 +196,7 @@ final class TradeManager: ObservableObject {
             print("📦 [Trade] 加载了 \(offers.count) 个可接受的挂单")
         } catch {
             print("❌ [Trade] 加载可接受挂单失败: \(error)")
+            errorMessage = "加载交易市场失败，请稍后重试"
         }
     }
 

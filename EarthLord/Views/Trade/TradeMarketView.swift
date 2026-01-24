@@ -45,6 +45,22 @@ struct TradeMarketView: View {
                 TradeOfferDetailView(offer: offer)
             }
         }
+        .alert("加载失败", isPresented: .init(
+            get: { tradeManager.errorMessage != nil },
+            set: { if !$0 { tradeManager.errorMessage = nil } }
+        )) {
+            Button("重试") {
+                tradeManager.errorMessage = nil
+                Task {
+                    await tradeManager.loadAvailableOffers()
+                }
+            }
+            Button("取消", role: .cancel) {
+                tradeManager.errorMessage = nil
+            }
+        } message: {
+            Text(tradeManager.errorMessage ?? "")
+        }
     }
 
     // MARK: - 加载中视图
