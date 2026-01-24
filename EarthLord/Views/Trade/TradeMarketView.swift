@@ -12,11 +12,8 @@ struct TradeMarketView: View {
 
     @StateObject private var tradeManager = TradeManager.shared
 
-    /// 选中的挂单详情
+    /// 选中的挂单详情（用于展示详情页）
     @State private var selectedOffer: TradeOffer?
-
-    /// 显示详情页
-    @State private var showDetail = false
 
     var body: some View {
         ScrollView {
@@ -40,10 +37,8 @@ struct TradeMarketView: View {
                 await tradeManager.loadAvailableOffers()
             }
         }
-        .sheet(isPresented: $showDetail) {
-            if let offer = selectedOffer {
-                TradeOfferDetailView(offer: offer)
-            }
+        .sheet(item: $selectedOffer) { offer in
+            TradeOfferDetailView(offer: offer)
         }
         .alert("加载失败", isPresented: .init(
             get: { tradeManager.errorMessage != nil },
@@ -126,7 +121,6 @@ struct TradeMarketView: View {
                     isOwn: false,
                     onTap: {
                         selectedOffer = offer
-                        showDetail = true
                     }
                 )
             }

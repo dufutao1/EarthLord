@@ -3,7 +3,7 @@
 //  EarthLord
 //
 //  资源模块主入口页面
-//  包含 POI、背包、已购、领地、交易 五个分段
+//  包含 POI、背包、已购、交易 四个分段
 //
 
 import SwiftUI
@@ -13,15 +13,13 @@ enum ResourceSegment: Int, CaseIterable {
     case poi = 0        // 兴趣点
     case backpack = 1   // 背包
     case purchased = 2  // 已购
-    case territory = 3  // 领地
-    case trade = 4      // 交易
+    case trade = 3      // 交易
 
     var title: String {
         switch self {
         case .poi: return "POI"
         case .backpack: return "背包"
         case .purchased: return "已购"
-        case .territory: return "领地"
         case .trade: return "交易"
         }
     }
@@ -56,6 +54,9 @@ struct ResourcesTabView: View {
             }
             .navigationTitle("资源")
             .navigationBarTitleDisplayMode(.large)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(ApocalypseTheme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 // 右上角交易开关
                 ToolbarItem(placement: .topBarTrailing) {
@@ -151,14 +152,6 @@ struct ResourcesTabView: View {
             placeholderView(
                 icon: "bag.fill",
                 title: "已购物品",
-                subtitle: "功能开发中..."
-            )
-
-        case .territory:
-            // 领地 - 占位
-            placeholderView(
-                icon: "flag.fill",
-                title: "领地资源",
                 subtitle: "功能开发中..."
             )
 
@@ -266,6 +259,9 @@ struct BackpackContentView: View {
     /// 容量动画值
     @State private var animatedCapacity: Double = 0
 
+    /// 要丢弃的物品（用于显示丢弃弹窗）
+    @State private var itemToDiscard: InventoryItemDB?
+
     /// 列表动画ID（用于触发列表刷新动画）
     @State private var listAnimationID: UUID = UUID()
 
@@ -314,13 +310,26 @@ struct BackpackContentView: View {
             itemListView
         }
         .onAppear {
-            // 加载背包数据
+            // 加载背包数据（确保物品定义先加载）
             Task {
+                if inventoryManager.itemDefinitions.isEmpty {
+                    await inventoryManager.loadItemDefinitions()
+                }
                 await inventoryManager.loadInventory()
+                // 初始化容量动画
+                withAnimation(.easeOut(duration: 0.8)) {
+                    animatedCapacity = usedCapacity
+                }
             }
         }
         .onChange(of: inventoryManager.items) { _, _ in
             // 物品变化时更新容量动画
+            withAnimation(.easeOut(duration: 0.8)) {
+                animatedCapacity = usedCapacity
+            }
+        }
+        .onChange(of: inventoryManager.itemDefinitions.count) { _, _ in
+            // 物品定义加载完成后重新计算容量
             withAnimation(.easeOut(duration: 0.8)) {
                 animatedCapacity = usedCapacity
             }
@@ -334,6 +343,24 @@ struct BackpackContentView: View {
         .refreshable {
             // 下拉刷新
             await inventoryManager.loadInventory()
+        }
+        .sheet(item: $itemToDiscard) { item in
+            DiscardItemSheet(
+                item: item,
+                inventoryManager: inventoryManager,
+                maxCapacity: maxCapacity,
+                currentWeight: usedCapacity,
+                onDiscard: { quantity in
+                    Task {
+                        await inventoryManager.removeItem(itemId: item.item_id, quantity: quantity)
+                        // 更新容量动画
+                        withAnimation(.easeOut(duration: 0.8)) {
+                            animatedCapacity = usedCapacity
+                        }
+                    }
+                }
+            )
+            .presentationDetents([.medium])
         }
     }
 
@@ -503,10 +530,8 @@ struct BackpackContentView: View {
                                     // TODO: 实现使用物品逻辑
                                 },
                                 onDiscard: {
-                                    print("🗑️ 丢弃: \(inventoryManager.getItemName(by: item.item_id))")
-                                    Task {
-                                        await inventoryManager.removeItem(itemId: item.item_id, quantity: 1)
-                                    }
+                                    // 显示丢弃数量选择弹窗
+                                    itemToDiscard = item
                                 }
                             )
                             .transition(.asymmetric(
@@ -767,6 +792,311 @@ struct ErrorStateView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
+    }
+}
+
+// MARK: - 丢弃物品弹窗
+
+/// 丢弃物品数量选择弹窗
+struct DiscardItemSheet: View {
+    let item: InventoryItemDB
+    let inventoryManager: InventoryManager
+    let maxCapacity: Double
+    let currentWeight: Double
+    let onDiscard: (Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    /// 要丢弃的数量
+    @State private var discardQuantity: Int = 1
+
+    /// 物品定义
+    private var definition: ItemDefinitionDB? {
+        inventoryManager.getItemDefinition(by: item.item_id)
+    }
+
+    /// 物品名称
+    private var itemName: String {
+        definition?.name ?? "未知物品"
+    }
+
+    /// 物品图标
+    private var itemIcon: String {
+        definition?.icon ?? "questionmark.circle"
+    }
+
+    /// 单个物品重量
+    private var unitWeight: Double {
+        definition?.weight ?? 0
+    }
+
+    /// 将释放的重量
+    private var weightToFree: Double {
+        unitWeight * Double(discardQuantity)
+    }
+
+    /// 丢弃后的剩余重量
+    private var remainingWeight: Double {
+        max(0, currentWeight - weightToFree)
+    }
+
+    /// 丢弃后的剩余容量百分比
+    private var remainingPercentage: Double {
+        remainingWeight / maxCapacity
+    }
+
+    /// 分类颜色
+    private var categoryColor: Color {
+        switch definition?.category {
+        case "food": return .orange
+        case "water": return .cyan
+        case "medical": return .red
+        case "material": return .brown
+        case "tool": return .gray
+        default: return ApocalypseTheme.primary
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                // 物品信息
+                itemInfoSection
+
+                Divider()
+                    .background(ApocalypseTheme.textMuted.opacity(0.3))
+
+                // 数量选择
+                quantitySection
+
+                // 容量预览
+                capacityPreviewSection
+
+                Spacer()
+
+                // 确认按钮
+                confirmButton
+            }
+            .padding(20)
+            .background(ApocalypseTheme.background)
+            .navigationTitle("丢弃物品")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") {
+                        dismiss()
+                    }
+                    .foregroundColor(ApocalypseTheme.textSecondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - 物品信息区域
+
+    private var itemInfoSection: some View {
+        HStack(spacing: 16) {
+            // 物品图标
+            ZStack {
+                Circle()
+                    .fill(categoryColor.opacity(0.2))
+                    .frame(width: 60, height: 60)
+
+                Image(systemName: itemIcon)
+                    .font(.system(size: 26))
+                    .foregroundColor(categoryColor)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(itemName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(ApocalypseTheme.textPrimary)
+
+                Text("当前持有: \(item.quantity) 个")
+                    .font(.system(size: 14))
+                    .foregroundColor(ApocalypseTheme.textSecondary)
+
+                Text("单重: \(String(format: "%.1f", unitWeight)) kg")
+                    .font(.system(size: 12))
+                    .foregroundColor(ApocalypseTheme.textMuted)
+            }
+
+            Spacer()
+        }
+    }
+
+    // MARK: - 数量选择区域
+
+    private var quantitySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("丢弃数量")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(ApocalypseTheme.textSecondary)
+
+            HStack(spacing: 12) {
+                // 减少按钮
+                Button(action: {
+                    if discardQuantity > 1 {
+                        discardQuantity -= 1
+                    }
+                }) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(discardQuantity > 1 ? ApocalypseTheme.primary : ApocalypseTheme.textMuted)
+                }
+                .disabled(discardQuantity <= 1)
+
+                // 数量显示
+                Text("\(discardQuantity)")
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundColor(ApocalypseTheme.textPrimary)
+                    .frame(minWidth: 60)
+
+                // 增加按钮
+                Button(action: {
+                    if discardQuantity < item.quantity {
+                        discardQuantity += 1
+                    }
+                }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(discardQuantity < item.quantity ? ApocalypseTheme.primary : ApocalypseTheme.textMuted)
+                }
+                .disabled(discardQuantity >= item.quantity)
+
+                Spacer()
+
+                // 快捷按钮
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        quickButton(quantity: 1)
+                        quickButton(quantity: 5)
+                        quickButton(quantity: 10)
+                    }
+                    quickButton(quantity: item.quantity, label: "全部")
+                }
+            }
+        }
+    }
+
+    private func quickButton(quantity: Int, label: String? = nil) -> some View {
+        let actualQuantity = min(quantity, item.quantity)
+        let isDisabled = actualQuantity <= 0
+
+        return Button(action: {
+            discardQuantity = actualQuantity
+        }) {
+            Text(label ?? "\(quantity)")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(discardQuantity == actualQuantity ? .white : ApocalypseTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    discardQuantity == actualQuantity
+                        ? ApocalypseTheme.primary
+                        : ApocalypseTheme.cardBackground
+                )
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(ApocalypseTheme.textMuted.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .disabled(isDisabled)
+    }
+
+    // MARK: - 容量预览区域
+
+    private var capacityPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("背包容量预览")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(ApocalypseTheme.textSecondary)
+
+            // 释放空间提示
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(ApocalypseTheme.success)
+
+                Text("将释放 \(String(format: "%.1f", weightToFree)) kg 空间")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(ApocalypseTheme.success)
+            }
+
+            // 容量条
+            VStack(spacing: 8) {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        // 背景条
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(ApocalypseTheme.textMuted.opacity(0.3))
+                            .frame(height: 16)
+
+                        // 丢弃后的容量（绿色）
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(ApocalypseTheme.success)
+                            .frame(width: geometry.size.width * min(remainingPercentage, 1.0), height: 16)
+
+                        // 当前容量线（虚线标记）
+                        Rectangle()
+                            .fill(ApocalypseTheme.warning)
+                            .frame(width: 2, height: 20)
+                            .offset(x: geometry.size.width * min(currentWeight / maxCapacity, 1.0) - 1)
+                    }
+                }
+                .frame(height: 16)
+
+                // 容量数字
+                HStack {
+                    Text("丢弃后:")
+                        .font(.system(size: 12))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+
+                    Text(String(format: "%.1f kg", remainingWeight))
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(ApocalypseTheme.success)
+
+                    Text("/")
+                        .foregroundColor(ApocalypseTheme.textMuted)
+
+                    Text(String(format: "%.0f kg", maxCapacity))
+                        .font(.system(size: 12))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+
+                    Spacer()
+
+                    Text("当前: \(String(format: "%.1f kg", currentWeight))")
+                        .font(.system(size: 12))
+                        .foregroundColor(ApocalypseTheme.warning)
+                }
+            }
+        }
+        .padding(16)
+        .background(ApocalypseTheme.cardBackground)
+        .cornerRadius(12)
+    }
+
+    // MARK: - 确认按钮
+
+    private var confirmButton: some View {
+        Button(action: {
+            onDiscard(discardQuantity)
+            dismiss()
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 16))
+
+                Text("确认丢弃 \(discardQuantity) 个 \(itemName)")
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(ApocalypseTheme.danger)
+            .cornerRadius(12)
+        }
     }
 }
 
