@@ -29,6 +29,7 @@ struct AuthView: View {
 
     @State private var loginEmail = ""
     @State private var loginPassword = ""
+    @State private var rememberPassword = true
 
     // MARK: - 注册表单状态
 
@@ -97,6 +98,13 @@ struct AuthView: View {
         }
         .sheet(isPresented: $showForgotPassword) {
             forgotPasswordSheet
+        }
+        .onAppear {
+            // 加载已保存的凭据
+            if let credentials = KeychainHelper.shared.loadCredentials() {
+                loginEmail = credentials.email
+                loginPassword = credentials.password
+            }
         }
         .onChange(of: authManager.otpVerified) { _, verified in
             // OTP 验证成功后自动进入第三步
@@ -222,9 +230,22 @@ struct AuthView: View {
                 text: $loginPassword
             )
 
-            // 忘记密码链接
+            // 记住密码 & 忘记密码
             HStack {
+                // 记住密码开关
+                Button(action: { rememberPassword.toggle() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: rememberPassword ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 16))
+                            .foregroundColor(rememberPassword ? ApocalypseTheme.primary : ApocalypseTheme.textMuted)
+                        Text("记住密码")
+                            .font(.system(size: 14))
+                            .foregroundColor(ApocalypseTheme.textSecondary)
+                    }
+                }
+
                 Spacer()
+
                 Button("忘记密码？") {
                     resetStep = 1
                     resetEmail = ""
@@ -241,6 +262,12 @@ struct AuthView: View {
             primaryButton(title: "登录") {
                 Task {
                     await authManager.signIn(email: loginEmail, password: loginPassword)
+                    // 登录成功后保存凭据
+                    if authManager.isAuthenticated && rememberPassword {
+                        KeychainHelper.shared.saveCredentials(email: loginEmail, password: loginPassword)
+                    } else if !rememberPassword {
+                        KeychainHelper.shared.clearCredentials()
+                    }
                 }
             }
             .disabled(loginEmail.isEmpty || loginPassword.isEmpty)

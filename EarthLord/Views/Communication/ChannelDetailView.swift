@@ -179,9 +179,24 @@ struct ChannelDetailView: View {
     // MARK: - 操作按钮
 
     private var actionSection: some View {
-        Group {
+        VStack(spacing: 10) {
             if isSubscribed {
-                // 已订阅 → 取消订阅
+                // 已订阅 → 进入聊天按钮
+                NavigationLink(destination: ChannelChatView(channel: channel)) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(.system(size: 16))
+                        Text("进入频道聊天")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(ApocalypseTheme.primary)
+                    .cornerRadius(12)
+                }
+
+                // 取消订阅按钮
                 Button(action: unsubscribe) {
                     HStack(spacing: 8) {
                         if isProcessing {

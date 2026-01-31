@@ -9,6 +9,7 @@
 import Foundation
 import Combine
 import Supabase
+import CoreLocation
 
 @MainActor
 final class CommunicationManager: ObservableObject {
@@ -23,6 +24,15 @@ final class CommunicationManager: ObservableObject {
     @Published private(set) var channels: [CommunicationChannel] = []
     @Published private(set) var subscribedChannels: [SubscribedChannel] = []
     @Published private(set) var mySubscriptions: [ChannelSubscription] = []
+
+    // MARK: - 消息相关属性
+    @Published var channelMessages: [UUID: [ChannelMessage]] = [:]
+    @Published var isSendingMessage = false
+
+    // MARK: - Realtime 相关属性
+    private var realtimeChannel: RealtimeChannelV2?
+    private var messageSubscriptionTask: Task<Void, Never>?
+    @Published var subscribedChannelIds: Set<UUID> = []
 
     private let client = supabase
 
@@ -295,6 +305,315 @@ final class CommunicationManager: ObservableObject {
             errorMessage = "删除频道失败: \(error.localizedDescription)"
             return false
         }
+    }
+
+    // MARK: - 加载频道历史消息
+
+    func loadChannelMessages(channelId: UUID) async {
+        do {
+            let messages: [ChannelMessage] = try await client
+                .from("channel_messages")
+                .select()
+                .eq("channel_id", value: channelId.uuidString)
+                .order("created_at", ascending: true)
+                .limit(50)
+                .execute()
+                .value
+
+            channelMessages[channelId] = messages
+        } catch {
+            errorMessage = "加载消息失败: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - 发送频道消息
+
+    func sendChannelMessage(
+        channelId: UUID,
+        content: String,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        deviceType: String? = nil
+    ) async -> Bool {
+        guard !content.trimmingCharacters(in: .whitespaces).isEmpty else {
+            errorMessage = "消息内容不能为空"
+            return false
+        }
+
+        isSendingMessage = true
+
+        do {
+            let params: [String: AnyJSON] = [
+                "p_channel_id": .string(channelId.uuidString),
+                "p_content": .string(content),
+                "p_latitude": latitude.map { .double($0) } ?? .null,
+                "p_longitude": longitude.map { .double($0) } ?? .null,
+                "p_device_type": deviceType.map { .string($0) } ?? .null
+            ]
+
+            let _: UUID = try await client
+                .rpc("send_channel_message", params: params)
+                .execute()
+                .value
+
+            isSendingMessage = false
+            return true
+        } catch {
+            errorMessage = "发送失败: \(error.localizedDescription)"
+            isSendingMessage = false
+            return false
+        }
+    }
+
+    // MARK: - 启动 Realtime 消息订阅
+
+    func startRealtimeSubscription() async {
+        // 如果已经订阅，先停止
+        await stopRealtimeSubscription()
+
+        // 创建 Realtime 频道
+        realtimeChannel = await client.realtimeV2.channel("channel_messages_realtime")
+
+        guard let channel = realtimeChannel else { return }
+
+        // 订阅 INSERT 事件
+        let insertions = await channel.postgresChange(
+            InsertAction.self,
+            table: "channel_messages"
+        )
+
+        // 启动监听任务
+        messageSubscriptionTask = Task { [weak self] in
+            for await insertion in insertions {
+                await self?.handleNewMessage(insertion: insertion)
+            }
+        }
+
+        // 开始订阅
+        await channel.subscribe()
+
+        print("[Realtime] 消息订阅已启动")
+    }
+
+    // MARK: - 停止 Realtime 订阅
+
+    func stopRealtimeSubscription() async {
+        messageSubscriptionTask?.cancel()
+        messageSubscriptionTask = nil
+
+        if let channel = realtimeChannel {
+            await channel.unsubscribe()
+            realtimeChannel = nil
+        }
+
+        print("[Realtime] 消息订阅已停止")
+    }
+
+    // MARK: - 处理新消息
+
+    private func handleNewMessage(insertion: InsertAction) async {
+        do {
+            let message = try insertion.decodeRecord(as: ChannelMessage.self, decoder: JSONDecoder())
+
+            // 第一关：检查是否是已订阅频道的消息
+            guard subscribedChannelIds.contains(message.channelId) else {
+                print("[Realtime] 忽略未订阅频道的消息: \(message.channelId)")
+                return
+            }
+
+            // 第二关：距离过滤（Day 35）
+            guard shouldReceiveMessage(message) else {
+                print("[Realtime] 距离过滤丢弃消息")
+                return
+            }
+
+            // 添加到消息列表
+            if channelMessages[message.channelId] != nil {
+                channelMessages[message.channelId]?.append(message)
+            } else {
+                channelMessages[message.channelId] = [message]
+            }
+
+            print("[Realtime] 收到新消息: \(message.content.prefix(20))...")
+        } catch {
+            print("[Realtime] 解析消息失败: \(error)")
+        }
+    }
+
+    // MARK: - 订阅频道消息（添加到订阅列表）
+
+    func subscribeToChannelMessages(channelId: UUID) {
+        subscribedChannelIds.insert(channelId)
+
+        // 如果 Realtime 未启动，启动它
+        if realtimeChannel == nil {
+            Task {
+                await startRealtimeSubscription()
+            }
+        }
+    }
+
+    // MARK: - 取消订阅频道消息
+
+    func unsubscribeFromChannelMessages(channelId: UUID) {
+        subscribedChannelIds.remove(channelId)
+        channelMessages.removeValue(forKey: channelId)
+
+        // 如果没有订阅任何频道，停止 Realtime
+        if subscribedChannelIds.isEmpty {
+            Task {
+                await stopRealtimeSubscription()
+            }
+        }
+    }
+
+    // MARK: - 获取频道消息列表
+
+    func getMessages(for channelId: UUID) -> [ChannelMessage] {
+        channelMessages[channelId] ?? []
+    }
+
+    // MARK: - 距离过滤逻辑（Day 35）
+
+    /// 判断是否应该接收该消息（基于设备类型和距离）
+    func shouldReceiveMessage(_ message: ChannelMessage) -> Bool {
+        // 1. 获取当前用户设备类型
+        guard let myDeviceType = currentDevice?.deviceType else {
+            print("⚠️ [距离过滤] 无法获取当前设备，保守显示消息")
+            return true  // 保守策略：无设备信息时显示
+        }
+
+        // 2. 收音机可以接收所有消息（无限距离）
+        if myDeviceType == .radio {
+            print("📻 [距离过滤] 收音机用户，接收所有消息")
+            return true
+        }
+
+        // 3. 检查发送者设备类型
+        guard let senderDevice = message.senderDeviceType else {
+            print("⚠️ [距离过滤] 消息缺少设备类型，保守显示（向后兼容）")
+            return true  // 向后兼容：老消息没有设备类型
+        }
+
+        // 4. 收音机不能发送消息
+        if senderDevice == .radio {
+            print("🚫 [距离过滤] 收音机不能发送消息")
+            return false
+        }
+
+        // 5. 检查发送者位置
+        guard let senderLocation = message.senderLocation else {
+            print("⚠️ [距离过滤] 消息缺少位置信息，保守显示")
+            return true  // 保守策略：无位置信息时显示
+        }
+
+        // 6. 获取当前用户位置
+        guard let myLocation = getCurrentLocation() else {
+            print("⚠️ [距离过滤] 无法获取当前位置，保守显示")
+            return true  // 保守策略：无当前位置时显示
+        }
+
+        // 7. 计算距离（公里）
+        let distance = calculateDistance(
+            from: CLLocationCoordinate2D(
+                latitude: myLocation.latitude,
+                longitude: myLocation.longitude
+            ),
+            to: CLLocationCoordinate2D(
+                latitude: senderLocation.latitude,
+                longitude: senderLocation.longitude
+            )
+        )
+
+        // 8. 根据设备矩阵判断
+        let canReceive = canReceiveMessage(
+            senderDevice: senderDevice,
+            myDevice: myDeviceType,
+            distance: distance
+        )
+
+        if canReceive {
+            print("✅ [距离过滤] 通过: 发送者=\(senderDevice.rawValue), 我=\(myDeviceType.rawValue), 距离=\(String(format: "%.1f", distance))km")
+        } else {
+            print("🚫 [距离过滤] 丢弃: 发送者=\(senderDevice.rawValue), 我=\(myDeviceType.rawValue), 距离=\(String(format: "%.1f", distance))km (超出范围)")
+        }
+
+        return canReceive
+    }
+
+    /// 根据设备类型矩阵判断是否能接收消息
+    private func canReceiveMessage(
+        senderDevice: DeviceType,
+        myDevice: DeviceType,
+        distance: Double
+    ) -> Bool {
+        // 收音机接收方：无距离限制
+        if myDevice == .radio {
+            return true
+        }
+
+        // 收音机发送方：不能发送
+        if senderDevice == .radio {
+            return false
+        }
+
+        // 设备矩阵（含5%缓冲区，减少GPS抖动影响）
+        switch (senderDevice, myDevice) {
+        // 对讲机发送（3km覆盖）
+        case (.walkieTalkie, .walkieTalkie):
+            return distance <= 3.15  // 3km + 5%缓冲
+        case (.walkieTalkie, .campRadio):
+            return distance <= 31.5  // 30km + 5%缓冲
+        case (.walkieTalkie, .satellite):
+            return distance <= 105.0  // 100km + 5%缓冲
+
+        // 营地电台发送（30km覆盖）
+        case (.campRadio, .walkieTalkie):
+            return distance <= 31.5
+        case (.campRadio, .campRadio):
+            return distance <= 31.5
+        case (.campRadio, .satellite):
+            return distance <= 105.0
+
+        // 卫星通讯发送（100km覆盖）
+        case (.satellite, .walkieTalkie):
+            return distance <= 105.0
+        case (.satellite, .campRadio):
+            return distance <= 105.0
+        case (.satellite, .satellite):
+            return distance <= 105.0
+
+        default:
+            return false
+        }
+    }
+
+    /// 计算两个坐标之间的距离（公里）
+    private func calculateDistance(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D
+    ) -> Double {
+        let fromLocation = CLLocation(
+            latitude: from.latitude,
+            longitude: from.longitude
+        )
+        let toLocation = CLLocation(
+            latitude: to.latitude,
+            longitude: to.longitude
+        )
+        return fromLocation.distance(from: toLocation) / 1000.0  // 转换为公里
+    }
+
+    /// 获取当前用户位置（从 LocationManager 获取真实 GPS）
+    private func getCurrentLocation() -> LocationPoint? {
+        guard let coordinate = LocationManager.shared.userLocation else {
+            print("⚠️ [距离过滤] LocationManager 无位置数据")
+            return nil
+        }
+        return LocationPoint(
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
     }
 }
 
