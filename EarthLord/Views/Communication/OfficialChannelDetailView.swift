@@ -3,165 +3,224 @@
 //  EarthLord
 //
 //  官方频道详情页
-//  Day 32-B: 显示官方频道的消息流（只读或可发送）
+//  Day 36-B: 显示官方频道消息，支持分类过滤
 //
 
 import SwiftUI
 
 struct OfficialChannelDetailView: View {
+    let channel: CommunicationChannel
 
-    let channelName: String
-    let channelIcon: String
-
-    @State private var messageText = ""
     @StateObject private var communicationManager = CommunicationManager.shared
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedCategory: MessageCategory?
+    @State private var isLoading = true
+
+    private var messages: [ChannelMessage] {
+        let allMessages = communicationManager.getMessages(for: channel.id)
+        if let category = selectedCategory {
+            return allMessages.filter { $0.category == category }
+        }
+        return allMessages
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 频道信息横幅
-            channelBanner
+        ZStack {
+            ApocalypseTheme.background.ignoresSafeArea()
 
-            // 消息列表
-            ScrollView {
-                VStack(spacing: 12) {
-                    // 示例系统消息
-                    officialMessage(
-                        sender: "系统",
-                        content: "欢迎加入「\(channelName)」频道",
-                        time: "刚刚"
-                    )
+            VStack(spacing: 0) {
+                // 导航栏
+                navigationBar
 
-                    officialMessage(
-                        sender: "管理员",
-                        content: sampleMessage(for: channelName),
-                        time: "5分钟前"
-                    )
-                }
-                .padding(16)
-            }
+                // 分类过滤器
+                categoryFilter
 
-            // 输入框（仅当设备支持发送时显示）
-            if communicationManager.canSendMessage() {
-                inputBar
-            } else {
-                readOnlyBanner
+                // 消息列表
+                messageListView
             }
         }
-        .background(ApocalypseTheme.background)
-        .navigationTitle(channelName)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarHidden(true)
+        .onAppear {
+            loadMessages()
+        }
     }
 
-    // MARK: - 频道横幅
+    // MARK: - 导航栏
+    private var navigationBar: some View {
+        HStack {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(ApocalypseTheme.primary)
+            }
 
-    private var channelBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: channelIcon)
-                .font(.system(size: 16))
-                .foregroundColor(ApocalypseTheme.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "megaphone.fill")
+                        .foregroundColor(.red)
+                    Text(channel.name)
+                        .font(.headline)
+                        .foregroundColor(ApocalypseTheme.text)
+                }
 
-            Text(channelName)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(ApocalypseTheme.textPrimary)
+                Text("官方公告 · 全球覆盖")
+                    .font(.caption)
+                    .foregroundColor(ApocalypseTheme.secondaryText)
+            }
 
             Spacer()
-
-            Text("官方")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(ApocalypseTheme.warning)
-                .cornerRadius(4)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(ApocalypseTheme.warning.opacity(0.08))
-    }
-
-    // MARK: - 官方消息气泡
-
-    private func officialMessage(sender: String, content: String, time: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text(sender)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(ApocalypseTheme.primary)
-                Text(time)
-                    .font(.system(size: 10))
-                    .foregroundColor(ApocalypseTheme.textMuted)
-            }
-
-            Text(content)
-                .font(.system(size: 14))
-                .foregroundColor(ApocalypseTheme.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(ApocalypseTheme.cardBackground)
-        .cornerRadius(10)
-    }
-
-    // MARK: - 输入框
-
-    private var inputBar: some View {
-        HStack(spacing: 10) {
-            TextField("输入消息...", text: $messageText)
-                .font(.system(size: 15))
-                .foregroundColor(ApocalypseTheme.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(ApocalypseTheme.cardBackground)
-                .cornerRadius(20)
-
-            Button(action: {
-                guard !messageText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                // TODO: 发送消息
-                messageText = ""
-            }) {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(
-                        messageText.trimmingCharacters(in: .whitespaces).isEmpty
-                            ? ApocalypseTheme.textMuted
-                            : ApocalypseTheme.primary
-                    )
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(ApocalypseTheme.cardBackground.opacity(0.8))
-    }
-
-    // MARK: - 只读提示
-
-    private var readOnlyBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 12))
-            Text("当前设备仅能接收消息，切换到对讲机以发送")
-                .font(.system(size: 12))
-        }
-        .foregroundColor(ApocalypseTheme.textMuted)
-        .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
         .background(ApocalypseTheme.cardBackground)
     }
 
-    // MARK: - 示例消息
+    // MARK: - 分类过滤器
+    private var categoryFilter: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // 全部
+                MessageCategoryChip(
+                    title: "全部",
+                    icon: "list.bullet",
+                    color: ApocalypseTheme.primary,
+                    isSelected: selectedCategory == nil
+                ) {
+                    selectedCategory = nil
+                }
 
-    private func sampleMessage(for channel: String) -> String {
-        switch channel {
-        case "全区广播": return "注意：北区发现物资补给点，坐标已标记在地图上。请附近的幸存者前往查看。"
-        case "交易频道": return "出木材30换金属10，有意者对讲机联系。"
-        case "求助频道": return "有人在东区吗？我受伤了，需要医疗物资援助。"
-        default: return "欢迎加入频道。"
+                // 各分类
+                ForEach(MessageCategory.allCases, id: \.self) { category in
+                    MessageCategoryChip(
+                        title: category.displayName,
+                        icon: category.iconName,
+                        color: category.color,
+                        isSelected: selectedCategory == category
+                    ) {
+                        selectedCategory = category
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .background(ApocalypseTheme.cardBackground.opacity(0.5))
+    }
+
+    // MARK: - 消息列表
+    private var messageListView: some View {
+        ScrollView {
+            if isLoading {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: ApocalypseTheme.primary))
+                    .padding(.top, 50)
+            } else if messages.isEmpty {
+                emptyStateView
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(messages) { message in
+                        OfficialMessageBubble(message: message)
+                    }
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    // MARK: - 空状态
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "tray")
+                .font(.system(size: 50))
+                .foregroundColor(ApocalypseTheme.secondaryText.opacity(0.5))
+
+            Text(selectedCategory == nil ? "暂无公告" : "暂无\(selectedCategory!.displayName)")
+                .font(.headline)
+                .foregroundColor(ApocalypseTheme.text)
+            Spacer()
+        }
+    }
+
+    private func loadMessages() {
+        isLoading = true
+        Task {
+            await communicationManager.loadChannelMessages(channelId: channel.id)
+            await MainActor.run {
+                isLoading = false
+            }
         }
     }
 }
 
-#Preview {
-    NavigationStack {
-        OfficialChannelDetailView(channelName: "全区广播", channelIcon: "megaphone.fill")
+// MARK: - 分类标签组件
+
+struct MessageCategoryChip: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(isSelected ? .white : color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? color : color.opacity(0.15))
+            .cornerRadius(16)
+        }
+    }
+}
+
+// MARK: - 官方消息气泡
+
+struct OfficialMessageBubble: View {
+    let message: ChannelMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 分类标签
+            if let category = message.category {
+                HStack(spacing: 4) {
+                    Image(systemName: category.iconName)
+                        .font(.system(size: 12))
+                    Text(category.displayName)
+                        .font(.caption)
+                        .fontWeight(.bold)
+                }
+                .foregroundColor(category.color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(category.color.opacity(0.15))
+                .cornerRadius(8)
+            }
+
+            // 消息内容
+            Text(message.content)
+                .font(.body)
+                .foregroundColor(ApocalypseTheme.text)
+
+            // 时间
+            Text(message.timeAgo)
+                .font(.caption)
+                .foregroundColor(ApocalypseTheme.secondaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(ApocalypseTheme.cardBackground)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(message.category?.color.opacity(0.3) ?? Color.clear, lineWidth: 1)
+        )
     }
 }

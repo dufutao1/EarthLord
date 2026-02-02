@@ -23,6 +23,10 @@ enum ApocalypseTheme {
     static let textSecondary = Color(white: 0.6)                           // 次要文字
     static let textMuted = Color(white: 0.4)                               // 弱化文字
 
+    // MARK: - 文字色别名（Day 36）
+    static let text = textPrimary                                           // 主文字别名
+    static let secondaryText = textSecondary                                // 次要文字别名
+
     // MARK: - 状态色
     static let success = Color(red: 0.2, green: 0.8, blue: 0.4)            // 成功/绿色
     static let warning = Color(red: 1.0, green: 0.8, blue: 0.0)            // 警告/黄色

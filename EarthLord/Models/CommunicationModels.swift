@@ -4,9 +4,102 @@
 //
 //  通讯系统数据模型
 //  Day 32-A: 设备类型、设备模型、导航枚举
+//  Day 36-A: 添加 MessageCategory 官方频道消息分类
 //
 
 import Foundation
+import SwiftUI
+
+// MARK: - 消息分类（官方频道专用）
+
+enum MessageCategory: String, Codable, CaseIterable {
+    case survival = "survival"   // 生存指南
+    case news = "news"           // 游戏资讯
+    case mission = "mission"     // 任务发布
+    case alert = "alert"         // 紧急广播
+
+    var displayName: String {
+        switch self {
+        case .survival: return "生存指南"
+        case .news: return "游戏资讯"
+        case .mission: return "任务发布"
+        case .alert: return "紧急广播"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .survival: return .green
+        case .news: return .blue
+        case .mission: return .orange
+        case .alert: return .red
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .survival: return "leaf.fill"
+        case .news: return "newspaper.fill"
+        case .mission: return "target"
+        case .alert: return "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+// MARK: - AnyCodable（用于解析动态 JSON）
+
+struct AnyCodable: Codable {
+    let value: Any
+
+    init(_ value: Any) {
+        self.value = value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            value = NSNull()
+        } else if let bool = try? container.decode(Bool.self) {
+            value = bool
+        } else if let int = try? container.decode(Int.self) {
+            value = int
+        } else if let double = try? container.decode(Double.self) {
+            value = double
+        } else if let string = try? container.decode(String.self) {
+            value = string
+        } else if let array = try? container.decode([AnyCodable].self) {
+            value = array.map { $0.value }
+        } else if let dict = try? container.decode([String: AnyCodable].self) {
+            value = dict.mapValues { $0.value }
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "AnyCodable 无法解码值")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+
+        switch value {
+        case is NSNull:
+            try container.encodeNil()
+        case let bool as Bool:
+            try container.encode(bool)
+        case let int as Int:
+            try container.encode(int)
+        case let double as Double:
+            try container.encode(double)
+        case let string as String:
+            try container.encode(string)
+        case let array as [Any]:
+            try container.encode(array.map { AnyCodable($0) })
+        case let dict as [String: Any]:
+            try container.encode(dict.mapValues { AnyCodable($0) })
+        default:
+            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "AnyCodable 无法编码值"))
+        }
+    }
+}
 
 // MARK: - 设备类型
 
@@ -245,15 +338,40 @@ struct LocationPoint: Codable {
         }
         return LocationPoint(latitude: latitude, longitude: longitude)
     }
+
+    // 从 GeoJSON 格式解析：{"type":"Point","coordinates":[经度, 纬度]}
+    static func fromGeoJSON(_ data: Data) -> LocationPoint? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String,
+              type == "Point",
+              let coordinates = json["coordinates"] as? [Double],
+              coordinates.count >= 2 else {
+            return nil
+        }
+        return LocationPoint(latitude: coordinates[1], longitude: coordinates[0])
+    }
+
+    // 从 GeoJSON 字典解析
+    static func fromGeoJSON(_ dict: [String: Any]) -> LocationPoint? {
+        guard let type = dict["type"] as? String,
+              type == "Point",
+              let coordinates = dict["coordinates"] as? [Double],
+              coordinates.count >= 2 else {
+            return nil
+        }
+        return LocationPoint(latitude: coordinates[1], longitude: coordinates[0])
+    }
 }
 
 // MARK: - 消息元数据
 
 struct MessageMetadata: Codable {
     let deviceType: String?
+    let category: String?  // Day 36: 消息分类（官方频道使用）
 
     enum CodingKeys: String, CodingKey {
         case deviceType = "device_type"
+        case category
     }
 }
 
@@ -295,10 +413,30 @@ struct ChannelMessage: Codable, Identifiable {
         content = try container.decode(String.self, forKey: .content)
         metadata = try container.decodeIfPresent(MessageMetadata.self, forKey: .metadata)
 
-        // 解析位置（可能是 PostGIS 格式或普通对象）
+        // 解析位置（支持多种格式：GeoJSON 字符串、WKT 字符串、GeoJSON 对象、普通对象）
         if let locationString = try? container.decode(String.self, forKey: .senderLocation) {
-            senderLocation = LocationPoint.fromPostGIS(locationString)
+            // 格式1: GeoJSON 字符串 "{\"type\":\"Point\",\"coordinates\":[经度, 纬度]}"
+            if locationString.contains("coordinates"),
+               let data = locationString.data(using: .utf8) {
+                senderLocation = LocationPoint.fromGeoJSON(data)
+            }
+            // 格式2: PostGIS WKT 字符串 "POINT(经度 纬度)"
+            else if locationString.hasPrefix("POINT") {
+                senderLocation = LocationPoint.fromPostGIS(locationString)
+            }
+            // 其他字符串格式，无法解析
+            else {
+                senderLocation = nil
+            }
+        } else if let locationDict = try? container.decode([String: AnyCodable].self, forKey: .senderLocation) {
+            // 格式3: GeoJSON 对象 {"type":"Point","coordinates":[经度, 纬度]}
+            var dict: [String: Any] = [:]
+            for (key, value) in locationDict {
+                dict[key] = value.value
+            }
+            senderLocation = LocationPoint.fromGeoJSON(dict)
         } else {
+            // 格式4: 普通 LocationPoint 对象
             senderLocation = try container.decodeIfPresent(LocationPoint.self, forKey: .senderLocation)
         }
 
@@ -366,5 +504,11 @@ struct ChannelMessage: Codable, Identifiable {
     // 获取设备类型
     var deviceType: String? {
         metadata?.deviceType
+    }
+
+    // Day 36: 获取消息分类（官方频道使用）
+    var category: MessageCategory? {
+        guard let categoryString = metadata?.category else { return nil }
+        return MessageCategory(rawValue: categoryString)
     }
 }

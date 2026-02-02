@@ -17,6 +17,9 @@ struct DeviceManagementView: View {
     @State private var showLockedAlert = false
     @State private var lockedDeviceType: DeviceType?
 
+    /// 呼号设置
+    @State private var showCallsignSheet = false
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -27,9 +30,15 @@ struct DeviceManagementView: View {
                 ForEach(DeviceType.allCases, id: \.self) { deviceType in
                     deviceCard(for: deviceType)
                 }
+
+                // 呼号设置区
+                callsignSection
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+        }
+        .sheet(isPresented: $showCallsignSheet) {
+            CallsignSettingsSheet()
         }
         .refreshable {
             if let userId = supabase.auth.currentUser?.id {
@@ -42,6 +51,58 @@ struct DeviceManagementView: View {
             if let deviceType = lockedDeviceType {
                 Text(deviceType.unlockRequirement)
             }
+        }
+    }
+
+    // MARK: - 呼号设置区
+
+    private var callsignSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.wave.2.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(ApocalypseTheme.primary)
+                Text("电台呼号")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(ApocalypseTheme.textSecondary)
+            }
+            .padding(.top, 8)
+
+            Button(action: { showCallsignSheet = true }) {
+                HStack(spacing: 14) {
+                    // 图标
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(ApocalypseTheme.primary.opacity(0.15))
+                            .frame(width: 52, height: 52)
+
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 22))
+                            .foregroundColor(ApocalypseTheme.primary)
+                    }
+
+                    // 信息
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("设置呼号")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(ApocalypseTheme.textPrimary)
+
+                        Text("设置您的电台呼号，让其他幸存者识别您")
+                            .font(.system(size: 12))
+                            .foregroundColor(ApocalypseTheme.textSecondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14))
+                        .foregroundColor(ApocalypseTheme.textMuted)
+                }
+                .padding(14)
+                .background(ApocalypseTheme.cardBackground)
+                .cornerRadius(12)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
     }
 

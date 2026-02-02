@@ -241,17 +241,12 @@ struct ChannelCenterView: View {
             }
             .padding(.leading, 4)
 
-            NavigationLink(destination: OfficialChannelDetailView(channelName: "全区广播", channelIcon: "megaphone.fill")) {
-                officialChannelRow(name: "全区广播", icon: "megaphone.fill", color: .orange)
-            }
-
-            NavigationLink(destination: OfficialChannelDetailView(channelName: "交易频道", channelIcon: "arrow.left.arrow.right")) {
-                officialChannelRow(name: "交易频道", icon: "arrow.left.arrow.right", color: .green)
-            }
-
-            NavigationLink(destination: OfficialChannelDetailView(channelName: "求助频道", channelIcon: "exclamationmark.triangle.fill")) {
-                officialChannelRow(name: "求助频道", icon: "exclamationmark.triangle.fill", color: .red)
-            }
+            // Day 36: 官方频道通过订阅列表访问，不再硬编码
+            // 官方频道会自动订阅，在"我的频道"中显示
+            Text("官方频道已自动订阅，请在我的频道中查看")
+                .font(.caption)
+                .foregroundColor(ApocalypseTheme.textMuted)
+                .padding(.vertical, 8)
         }
     }
 

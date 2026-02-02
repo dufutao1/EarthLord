@@ -252,6 +252,26 @@ struct MessageBubbleView: View {
     let message: ChannelMessage
     let isMe: Bool
 
+    /// 从缓存获取距离（收到消息时计算一次，不会随位置变化）
+    private var cachedDistance: Double? {
+        // 自己发的消息不显示距离
+        guard !isMe else { return nil }
+        // 从 CommunicationManager 获取缓存的距离
+        return CommunicationManager.shared.getCachedDistance(for: message.messageId)
+    }
+
+    /// 格式化距离显示
+    private var formattedDistance: String? {
+        guard let distance = cachedDistance else { return nil }
+        if distance < 1.0 {
+            return String(format: "%.0fm", distance * 1000)
+        } else if distance < 10.0 {
+            return String(format: "%.1fkm", distance)
+        } else {
+            return String(format: "%.0fkm", distance)
+        }
+    }
+
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             if isMe {
@@ -277,6 +297,19 @@ struct MessageBubbleView: View {
                         Image(systemName: deviceIconName(for: deviceType))
                             .font(.system(size: 10))
                             .foregroundColor(ApocalypseTheme.textMuted)
+                    }
+
+                    // Day 35: 显示距离
+                    if let distance = formattedDistance {
+                        Text("·")
+                            .font(.system(size: 10))
+                            .foregroundColor(ApocalypseTheme.textMuted)
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(ApocalypseTheme.info)
+                        Text(distance)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(ApocalypseTheme.info)
                     }
                 }
             }

@@ -15,6 +15,10 @@ import CoreLocation
 final class CommunicationManager: ObservableObject {
     static let shared = CommunicationManager()
 
+    // MARK: - 官方频道（Day 36）
+    /// 官方频道固定 UUID
+    static let officialChannelId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
     @Published private(set) var devices: [CommunicationDevice] = []
     @Published private(set) var currentDevice: CommunicationDevice?
     @Published private(set) var isLoading = false
@@ -28,6 +32,9 @@ final class CommunicationManager: ObservableObject {
     // MARK: - 消息相关属性
     @Published var channelMessages: [UUID: [ChannelMessage]] = [:]
     @Published var isSendingMessage = false
+
+    // MARK: - 消息距离缓存（收到消息时计算一次，不再变化）
+    private(set) var messageDistanceCache: [UUID: Double] = [:]  // messageId -> 距离(km)
 
     // MARK: - Realtime 相关属性
     private var realtimeChannel: RealtimeChannelV2?
@@ -194,6 +201,40 @@ final class CommunicationManager: ObservableObject {
         }
     }
 
+    // MARK: - 官方频道相关（Day 36）
+
+    /// 确保用户订阅了官方频道（强制订阅）
+    func ensureOfficialChannelSubscribed(userId: UUID) async {
+        let officialId = CommunicationManager.officialChannelId
+
+        // 检查是否已订阅
+        if subscribedChannels.contains(where: { $0.channel.id == officialId }) {
+            print("✅ [官方频道] 已订阅")
+            return
+        }
+
+        // 强制订阅官方频道
+        do {
+            let params: [String: AnyJSON] = [
+                "p_user_id": .string(userId.uuidString),
+                "p_channel_id": .string(officialId.uuidString)
+            ]
+
+            try await client.rpc("subscribe_to_channel", params: params).execute()
+
+            // 刷新订阅列表
+            await loadSubscribedChannels(userId: userId)
+            print("✅ [官方频道] 已自动订阅")
+        } catch {
+            print("❌ [官方频道] 订阅失败: \(error)")
+        }
+    }
+
+    /// 检查是否是官方频道
+    func isOfficialChannel(_ channelId: UUID) -> Bool {
+        return channelId == CommunicationManager.officialChannelId
+    }
+
     // MARK: - 创建频道
 
     func createChannel(
@@ -312,7 +353,7 @@ final class CommunicationManager: ObservableObject {
     func loadChannelMessages(channelId: UUID) async {
         do {
             let messages: [ChannelMessage] = try await client
-                .from("channel_messages")
+                .from("channel_messages_view")  // 使用视图获取 GeoJSON 格式的位置
                 .select()
                 .eq("channel_id", value: channelId.uuidString)
                 .order("created_at", ascending: true)
@@ -321,6 +362,11 @@ final class CommunicationManager: ObservableObject {
                 .value
 
             channelMessages[channelId] = messages
+
+            // 缓存每条消息的距离（加载时计算一次）
+            for message in messages {
+                cacheMessageDistance(message)
+            }
         } catch {
             errorMessage = "加载消息失败: \(error.localizedDescription)"
         }
@@ -413,11 +459,25 @@ final class CommunicationManager: ObservableObject {
 
     private func handleNewMessage(insertion: InsertAction) async {
         do {
-            let message = try insertion.decodeRecord(as: ChannelMessage.self, decoder: JSONDecoder())
+            // 先解码基本信息（用于过滤判断）
+            let basicMessage = try insertion.decodeRecord(as: ChannelMessage.self, decoder: JSONDecoder())
 
             // 第一关：检查是否是已订阅频道的消息
-            guard subscribedChannelIds.contains(message.channelId) else {
-                print("[Realtime] 忽略未订阅频道的消息: \(message.channelId)")
+            guard subscribedChannelIds.contains(basicMessage.channelId) else {
+                print("[Realtime] 忽略未订阅频道的消息: \(basicMessage.channelId)")
+                return
+            }
+
+            // 从视图重新获取完整消息（包含正确格式的位置信息）
+            let fullMessages: [ChannelMessage] = try await client
+                .from("channel_messages_view")
+                .select()
+                .eq("message_id", value: basicMessage.messageId.uuidString)
+                .execute()
+                .value
+
+            guard let message = fullMessages.first else {
+                print("[Realtime] 无法从视图获取消息")
                 return
             }
 
@@ -426,6 +486,9 @@ final class CommunicationManager: ObservableObject {
                 print("[Realtime] 距离过滤丢弃消息")
                 return
             }
+
+            // 缓存距离（收到时计算一次，之后不变）
+            cacheMessageDistance(message)
 
             // 添加到消息列表
             if channelMessages[message.channelId] != nil {
@@ -471,6 +534,106 @@ final class CommunicationManager: ObservableObject {
 
     func getMessages(for channelId: UUID) -> [ChannelMessage] {
         channelMessages[channelId] ?? []
+    }
+
+    /// 获取消息的缓存距离（公里），如果没有缓存则返回 nil
+    func getCachedDistance(for messageId: UUID) -> Double? {
+        messageDistanceCache[messageId]
+    }
+
+    // MARK: - 消息聚合相关（Day 36-C）
+
+    /// 频道摘要（用于消息聚合页）
+    struct ChannelSummary: Identifiable {
+        let channel: CommunicationChannel
+        let lastMessage: ChannelMessage?
+        let unreadCount: Int
+
+        var id: UUID { channel.id }
+    }
+
+    /// 获取所有订阅频道的摘要（最新消息 + 未读数）
+    func getChannelSummaries() -> [ChannelSummary] {
+        return subscribedChannels.map { subscribedChannel in
+            let messages = channelMessages[subscribedChannel.channel.id] ?? []
+            let lastMessage = messages.last
+            // 简化版：暂不计算真实未读数，后续可扩展
+            let unreadCount = 0
+
+            return ChannelSummary(
+                channel: subscribedChannel.channel,
+                lastMessage: lastMessage,
+                unreadCount: unreadCount
+            )
+        }.sorted { summary1, summary2 in
+            // 官方频道置顶
+            if summary1.channel.channelType == .official && summary2.channel.channelType != .official {
+                return true
+            }
+            if summary1.channel.channelType != .official && summary2.channel.channelType == .official {
+                return false
+            }
+            // 其他按最新消息时间排序
+            let time1 = summary1.lastMessage?.createdAt ?? summary1.channel.createdAt
+            let time2 = summary2.lastMessage?.createdAt ?? summary2.channel.createdAt
+            return time1 > time2
+        }
+    }
+
+    /// 加载所有订阅频道的最新消息（用于消息聚合页初始化）
+    func loadAllChannelLatestMessages() async {
+        for subscribedChannel in subscribedChannels {
+            let channelId = subscribedChannel.channel.id
+            // 只加载最新的 1 条消息（用于预览）
+            do {
+                let messages: [ChannelMessage] = try await client
+                    .from("channel_messages_view")
+                    .select()
+                    .eq("channel_id", value: channelId.uuidString)
+                    .order("created_at", ascending: false)
+                    .limit(1)
+                    .execute()
+                    .value
+
+                if let lastMessage = messages.first {
+                    if channelMessages[channelId] == nil {
+                        channelMessages[channelId] = [lastMessage]
+                    } else if !channelMessages[channelId]!.contains(where: { $0.id == lastMessage.id }) {
+                        channelMessages[channelId]?.append(lastMessage)
+                    }
+                    // 缓存距离
+                    cacheMessageDistance(lastMessage)
+                }
+            } catch {
+                print("❌ [消息聚合] 加载频道 \(channelId) 最新消息失败: \(error)")
+            }
+        }
+    }
+
+    /// 计算并缓存消息距离
+    private func cacheMessageDistance(_ message: ChannelMessage) {
+        // 已缓存则跳过
+        guard messageDistanceCache[message.messageId] == nil else { return }
+
+        // 需要发送者位置
+        guard let senderLocation = message.senderLocation else { return }
+
+        // 需要当前用户位置
+        guard let myLocation = getCurrentLocation() else { return }
+
+        // 转换为 CLLocationCoordinate2D
+        let senderCoord = CLLocationCoordinate2D(
+            latitude: senderLocation.latitude,
+            longitude: senderLocation.longitude
+        )
+        let myCoord = CLLocationCoordinate2D(
+            latitude: myLocation.latitude,
+            longitude: myLocation.longitude
+        )
+
+        // 计算距离
+        let distance = calculateDistance(from: senderCoord, to: myCoord)
+        messageDistanceCache[message.messageId] = distance
     }
 
     // MARK: - 距离过滤逻辑（Day 35）
