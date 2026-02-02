@@ -181,19 +181,35 @@ struct ChannelDetailView: View {
     private var actionSection: some View {
         VStack(spacing: 10) {
             if isSubscribed {
-                // 已订阅 → 进入聊天按钮
-                NavigationLink(destination: ChannelChatView(channel: channel)) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .font(.system(size: 16))
-                        Text("进入频道聊天")
-                            .font(.system(size: 16, weight: .semibold))
+                // 已订阅 → 进入聊天按钮（官方频道进入公告页，其他进入聊天）
+                if channel.channelType == .official {
+                    NavigationLink(destination: OfficialChannelDetailView(channel: channel)) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "megaphone.fill")
+                                .font(.system(size: 16))
+                            Text("查看官方公告")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(ApocalypseTheme.warning)
+                        .cornerRadius(12)
                     }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(ApocalypseTheme.primary)
-                    .cornerRadius(12)
+                } else {
+                    NavigationLink(destination: ChannelChatView(channel: channel)) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill")
+                                .font(.system(size: 16))
+                            Text("进入频道聊天")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(ApocalypseTheme.primary)
+                        .cornerRadius(12)
+                    }
                 }
 
                 // 取消订阅按钮

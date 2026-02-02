@@ -17,36 +17,51 @@ struct ChannelCenterView: View {
     @State private var searchText = ""
     @State private var showCreateSheet = false
     @State private var selectedChannel: CommunicationChannel?
+    @State private var selectedOfficialChannel: CommunicationChannel?
 
     // MARK: - Body
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 顶部操作栏
-            topBar
+        NavigationStack {
+            VStack(spacing: 0) {
+                // 顶部操作栏
+                topBar
 
-            // Tab 切换栏
-            tabSelector
+                // Tab 切换栏
+                tabSelector
 
-            // 内容区域
-            if selectedTab == 0 {
-                myChannelsView
-            } else {
-                discoverChannelsView
+                // 内容区域
+                if selectedTab == 0 {
+                    myChannelsView
+                } else {
+                    discoverChannelsView
+                }
+            }
+            .onAppear {
+                loadData()
+            }
+            .sheet(isPresented: $showCreateSheet) {
+                CreateChannelSheet(onCreated: {
+                    loadData()
+                })
+            }
+            .sheet(item: $selectedChannel) { channel in
+                ChannelDetailView(channel: channel, onChanged: {
+                    loadData()
+                })
+            }
+            .navigationDestination(item: $selectedOfficialChannel) { channel in
+                OfficialChannelDetailView(channel: channel)
             }
         }
-        .onAppear {
-            loadData()
-        }
-        .sheet(isPresented: $showCreateSheet) {
-            CreateChannelSheet(onCreated: {
-                loadData()
-            })
-        }
-        .sheet(item: $selectedChannel) { channel in
-            ChannelDetailView(channel: channel, onChanged: {
-                loadData()
-            })
+    }
+
+    // MARK: - 处理频道点击
+    private func handleChannelTap(_ channel: CommunicationChannel) {
+        if channel.channelType == .official {
+            selectedOfficialChannel = channel
+        } else {
+            selectedChannel = channel
         }
     }
 
@@ -141,7 +156,7 @@ struct ChannelCenterView: View {
                         ForEach(communicationManager.subscribedChannels) { sub in
                             channelRow(channel: sub.channel, isSubscribed: true)
                                 .onTapGesture {
-                                    selectedChannel = sub.channel
+                                    handleChannelTap(sub.channel)
                                 }
                         }
                     }
@@ -201,7 +216,7 @@ struct ChannelCenterView: View {
                                 isSubscribed: communicationManager.isSubscribed(channelId: channel.id)
                             )
                             .onTapGesture {
-                                selectedChannel = channel
+                                handleChannelTap(channel)
                             }
                         }
                     }

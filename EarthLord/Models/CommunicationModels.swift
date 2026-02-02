@@ -248,7 +248,7 @@ enum ChannelType: String, Codable, CaseIterable {
 
 // MARK: - 频道模型
 
-struct CommunicationChannel: Codable, Identifiable {
+struct CommunicationChannel: Codable, Identifiable, Hashable {
     let id: UUID
     let creatorId: UUID
     let channelType: ChannelType
