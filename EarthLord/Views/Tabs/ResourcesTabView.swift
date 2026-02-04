@@ -35,6 +35,9 @@ struct ResourcesTabView: View {
     /// 交易开关状态（假数据）
     @State private var isTradeEnabled: Bool = false
 
+    /// 商城页面显示
+    @State private var showStore: Bool = false
+
     // MARK: - Body
 
     var body: some View {
@@ -58,10 +61,30 @@ struct ResourcesTabView: View {
             .toolbarBackground(ApocalypseTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                // 商城按钮
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: { showStore = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bag.fill")
+                                .font(.system(size: 14))
+                            Text("商城")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(ApocalypseTheme.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(ApocalypseTheme.primary.opacity(0.15))
+                        .cornerRadius(8)
+                    }
+                }
+
                 // 右上角交易开关
                 ToolbarItem(placement: .topBarTrailing) {
                     tradeToggle
                 }
+            }
+            .sheet(isPresented: $showStore) {
+                StoreView()
             }
         }
     }
